@@ -1,8 +1,22 @@
 import { useState, useEffect } from 'react';
 import { getDashboardStats } from '../../services/api';
 
-export default function TopBar({ onToggleSidebar }) {
+function useClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+function formatUTC(date) {
+  return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
+export default function TopBar() {
   const [stats, setStats] = useState(null);
+  const now = useClock();
 
   useEffect(() => {
     getDashboardStats().then(res => setStats(res.data)).catch(() => {});
@@ -11,18 +25,11 @@ export default function TopBar({ onToggleSidebar }) {
   return (
     <div className="topbar">
       <div className="topbar-left">
-        <button
-          className="mobile-menu-btn"
-          onClick={onToggleSidebar}
-          aria-label="Open menu"
-        >
-          ☰
-        </button>
         <div className="topbar-meta">
           <div className="topbar-meta-item">
-            <span className="topbar-meta-label">Dataset</span>
+            <span className="topbar-meta-label">TXNS</span>
             <span className="topbar-meta-value">
-              {stats ? `${stats.total_transactions.toLocaleString()} TX` : '—'}
+              {stats ? stats.total_transactions.toLocaleString() : '—'}
             </span>
           </div>
           <div className="topbar-meta-item">
@@ -44,11 +51,16 @@ export default function TopBar({ onToggleSidebar }) {
             </span>
           </div>
         </div>
+        <div className="topbar-status" style={{ color: 'var(--accent-elevated)' }}>
+          <span className="pulse-dot" style={{ background: 'var(--accent-elevated)' }} />
+          OFFLINE MODE
+        </div>
       </div>
 
       <div className="topbar-right">
-        <div className="search-bar" style={{ width: 240 }}>
-          <span style={{ opacity: 0.4 }}>🔍</span>
+        <span className="topbar-clock">{formatUTC(now)}</span>
+        <div className="search-bar" style={{ width: 220 }}>
+          <span style={{ opacity: 0.4 }}>⌕</span>
           <input type="text" placeholder="Search entity, hash, IP..." />
         </div>
       </div>

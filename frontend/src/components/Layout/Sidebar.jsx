@@ -1,48 +1,34 @@
 import { NavLink } from 'react-router-dom';
 
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: '◈' },
-  { path: '/alerts', label: 'Alerts', icon: '⚠' },
-  { path: '/graph', label: 'Graph Explorer', icon: '◎' },
-  { path: '/wallets', label: 'Wallets', icon: '◆' },
-  { path: '/transactions', label: 'Transactions', icon: '⇄' },
-  { path: '/ingest', label: 'Ingest', icon: '↓' },
+  { path: '/', label: 'Dashboard', key: 'D', end: true },
+  { path: '/alerts', label: 'Alerts', key: 'A' },
+  { path: '/wallets', label: 'Wallets', key: 'W' },
+  { path: '/graph', label: 'Graph', key: 'G' },
+  { path: '/transactions', label: 'Txns', key: 'T' },
+  { path: '/ingest', label: 'Ingest', key: 'I' },
 ];
 
 const bottomItems = [
-  { path: '/settings', label: 'Settings', icon: '⚙' },
+  { path: '/settings', label: 'Settings', key: 'S' },
 ];
 
-export default function Sidebar({ isOpen, onClose }) {
+export default function Sidebar() {
   return (
-    <aside className={`sidebar ${isOpen ? 'mobile-open' : ''}`}>
-      <div className="sidebar-brand">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h1>CHAINTRACE</h1>
-            <div className="brand-sub">Forensics v1.0</div>
-          </div>
-          <button
-            className="sidebar-close-btn"
-            onClick={onClose}
-            aria-label="Close menu"
-          >
-            ✕
-          </button>
-        </div>
-      </div>
+    <aside className="sidebar">
+      <div className="sidebar-mark" title="ChainTrace Forensics">CT</div>
 
       <nav className="sidebar-nav">
         {navItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}
-            end={item.path === '/'}
-            onClick={onClose}
+            end={item.end}
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            title={item.label}
           >
-            <span className="nav-icon">{item.icon}</span>
-            {item.label}
+            <span className="nav-key">{item.key}</span>
+            <span className="nav-label">{item.label}</span>
           </NavLink>
         ))}
       </nav>
@@ -52,11 +38,11 @@ export default function Sidebar({ isOpen, onClose }) {
           <NavLink
             key={item.path}
             to={item.path}
-            onClick={onClose}
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            title={item.label}
           >
-            <span className="nav-icon">{item.icon}</span>
-            {item.label}
+            <span className="nav-key">{item.key}</span>
+            <span className="nav-label">{item.label}</span>
           </NavLink>
         ))}
       </div>
