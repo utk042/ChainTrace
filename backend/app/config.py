@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # ── API ────────────────────────────────────────────────────────────
     API_HOST: str = "0.0.0.0"
-    API_PORT: int = 8000
+    API_PORT: int = int(os.environ.get("PORT", 8000))
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
     # ── ML / Autoencoder ───────────────────────────────────────────────
