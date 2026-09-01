@@ -1,11 +1,26 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+export const getApiBaseUrl = () => {
+  return localStorage.getItem('CT_API_URL') || import.meta.env.VITE_API_URL || '';
+};
+
+export const setApiBaseUrl = (url) => {
+  if (url) {
+    localStorage.setItem('CT_API_URL', url.replace(/\/+$/, ''));
+  } else {
+    localStorage.removeItem('CT_API_URL');
+  }
+};
 
 const api = axios.create({
-  baseURL: API_BASE,
+  baseURL: getApiBaseUrl(),
   timeout: 120000,
   headers: { 'Content-Type': 'application/json' },
+});
+
+api.interceptors.request.use((config) => {
+  config.baseURL = getApiBaseUrl();
+  return config;
 });
 
 // ─── Dashboard ───────────────────────────────────────────────

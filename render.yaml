@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: chaintrace-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: oregon
+    envVars:
+      - key: CT_DUCKDB_PATH
+        value: /app/data/chaintrace.duckdb
+      - key: CT_CORS_ORIGINS
+        value: '["*"]'
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    healthCheckPath: /api/health
+
+    # NOTE: If upgrading to Starter plan ($7/mo) with persistent disk,
+    # change plan to 'starter' and uncomment the disk block below:
+    # disk:
+    #   name: chaintrace-data
+    #   mountPath: /app/data
+    #   sizeGB: 5

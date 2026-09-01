@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   getSettings, updateSettings, resetSettings, purgeCache,
   getSeedWallets, addSeedWallet, removeSeedWallet,
+  getApiBaseUrl, setApiBaseUrl,
 } from '../services/api';
 import Icon from '../components/Icon';
 
@@ -19,6 +20,15 @@ export default function Settings() {
   const [seedWallets, setSeedWallets] = useState([]);
   const [newSeedAddress, setNewSeedAddress] = useState('');
   const [newSeedLabel, setNewSeedLabel] = useState('');
+  const [apiUrl, setApiUrl] = useState(getApiBaseUrl() || '');
+
+  const handleSaveApiUrl = () => {
+    setApiBaseUrl(apiUrl.trim());
+    setMessage('API URL updated. Refreshing connection...');
+    setTimeout(() => {
+      window.location.reload();
+    }, 800);
+  };
 
   useEffect(() => {
     getSettings().then(res => setSettings_(res.data)).catch(() => {});
@@ -302,6 +312,32 @@ export default function Settings() {
                       <div style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{v}</div>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
+                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-md)' }}>Backend API Connection</h2>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-md)' }}>
+                  Active backend API endpoint (e.g. your Render web service URL). By default, this uses the <code>VITE_API_URL</code> environment variable. You can also override it here directly in your browser.
+                </p>
+                <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    placeholder="e.g. https://chaintrace-backend.onrender.com"
+                    value={apiUrl}
+                    onChange={e => setApiUrl(e.target.value)}
+                    style={{ flex: '1 1 320px', background: 'var(--bg-input)', border: '1px solid var(--border-primary)',
+                      color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)',
+                      padding: '8px 12px', borderRadius: 'var(--radius-md)' }}
+                  />
+                  <button className="btn btn-primary" onClick={handleSaveApiUrl}>
+                    Save Backend URL
+                  </button>
+                  {apiUrl && (
+                    <button className="btn btn-secondary" onClick={() => { setApiUrl(''); setApiBaseUrl(''); window.location.reload(); }}>
+                      Reset to Default
+                    </button>
+                  )}
                 </div>
               </div>
 
