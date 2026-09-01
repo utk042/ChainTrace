@@ -26,10 +26,13 @@ Comprehensive materials for understanding, demonstrating, and defending the proj
 | **Storage** | DuckDB (embedded OLAP) | Analytical queries, no server needed |
 | **Validation** | Pydantic v2 | Strict schema validation for ingested data |
 | **GeoIP** | MaxMind GeoLite2 | Offline IP → Country/ASN enrichment |
-| **Graph** | NetworkX + Louvain | Entity graph construction + wallet clustering |
+| **Graph** | NetworkX + Louvain | Entity graph construction + common-input-ownership wallet clustering |
+| **Pattern Detection** | Custom structural detectors | Peeling-chain, CoinJoin-like mixing, fan-in/fan-out consolidation hubs |
+| **Risk Propagation** | BFS + hop-decay | Spreads risk from operator-maintained seed/watchlist wallets |
 | **ML** | PyTorch Autoencoder | Unsupervised anomaly detection (reconstruction error) |
-| **Embeddings** | Node2Vec (PyG) | 64-dim graph embeddings per node |
+| **Embeddings** | Node2Vec (PyG) | 64-dim graph embeddings — refines wallet clusters and powers similar-wallet lookup |
 | **Explainability** | SHAP KernelExplainer | Per-feature attribution for each alert |
+| **Real Data** | httpx + Blockstream Esplora API | Optional live fetch of real, verifiable on-chain transactions |
 | **API** | FastAPI | REST endpoints serving all data |
 | **Frontend** | React + Vite | Dark forensic dashboard |
 | **Visualization** | Sigma.js + ECharts | Interactive link-analysis graph + charts |
@@ -72,33 +75,37 @@ Access at http://localhost:3000
 
 1. **Ingest** CSV/JSON/XML → Pydantic validation → DuckDB
 2. **Graph** Build NetworkX entity graph (IP–Wallet–TX edges)
-3. **Cluster** Louvain community detection on wallet subgraph
-4. **Features** 13 behavioral features per wallet
-5. **Train** PyTorch Autoencoder (13→32→16→8→16→32→13)
-6. **Embed** Node2Vec 64-dim embeddings
-7. **Score** Reconstruction error → anomaly scores
-8. **Explain** SHAP KernelExplainer → per-feature attribution
-9. **Alert** Generate ranked, explainable alert list
+3. **Cluster** Louvain community detection on wallet subgraph (common-input-ownership heuristic)
+4. **Detect** Structural pattern detectors (peeling chains, CoinJoin-like mixing, consolidation hubs) + BFS risk propagation from seed/watchlist wallets
+5. **Features** 16 behavioral + structural features per wallet (13 behavioral + peel-chain depth + mixer-interaction count + seed-proximity score)
+6. **Train** PyTorch Autoencoder (16→32→16→8→16→32→16)
+7. **Embed** Node2Vec 64-dim embeddings → refines Louvain clusters by similarity, powers a "similar wallets" lookup
+8. **Score** Reconstruction error → anomaly scores
+9. **Explain** SHAP KernelExplainer → per-feature attribution
+10. **Alert** Union of autoencoder-flagged wallets and every structural-detector hit, each ranked and explained; a textbook peeling chain gets flagged even if its generic behavioral stats don't clear the anomaly percentile
 
 ### Detected Patterns
 
-| Pattern | Detection Method |
-|---------|-----------------|
-| Peeling Chains | Sequential 1→2 splits, high fan-out |
-| Mixer/Tumbler | Fan-in anomaly + temporal clustering |
-| Velocity Spikes | TX/hour exceeding threshold |
-| Round-Amount Structuring | Round-number output ratio |
-| Darknet Proximity | N-hop distance to flagged entities |
+| Pattern | Detection Method | How it's surfaced |
+|---------|-----------------|-----------------|
+| Peeling Chains | Consecutive peel-shaped transactions (large "change" output forwarded onward, small amount split off), chained forward through time to a real hop depth | Dedicated alert category, per-wallet chain depth |
+| CoinJoin-like Mixing | Single transaction with several equal-value outputs from multiple distinct inputs, gated by the Mixer Confidence threshold | Dedicated alert category |
+| Consolidation/Mixing Hubs | Wallet with high fan-in *and* fan-out that passes received value through rather than accumulating it — the on-chain shape of a hosted mixing service | Dedicated alert category |
+| Risk (Seed) Propagation | BFS hop-distance with exponential decay from operator-maintained seed/watchlist wallets (Settings → Seed Watchlist), bounded by the Darknet Proximity Hops setting | Dedicated alert category, per-wallet hop count |
+| Velocity Spikes | TX/hour exceeding the Velocity Spike Threshold setting | SHAP-surfaced explanation on autoencoder alerts |
+| Round-Amount Structuring | Round-number output ratio exceeding the Round-Amount Threshold setting | SHAP-surfaced explanation on autoencoder alerts |
+
+All five forensic thresholds on the Settings page (Mixer Confidence, Darknet Proximity Hops, Velocity Spike Threshold, Round-Amount Threshold, Anomaly Percentile) are read live by the detectors above — editing one and re-running the pipeline changes real detection behavior, not just a stored value.
 
 ## 🖥 Dashboard Pages
 
 - **Dashboard** — KPIs, activity timeline, risk distribution, top alerts
-- **Alerts** — Filterable alert table with SHAP feature bars
+- **Alerts** — Filterable alert table with SHAP feature bars and per-detector labels (Peel-Chain, CoinJoin, Mixer-Hub, Risk-Propagation, Autoencoder)
 - **Graph Explorer** — Interactive Sigma.js graph with node search
-- **Wallets** — Wallet browser with detail panel
+- **Wallets** — Wallet browser with detail panel: pattern badges (peeling chain / mixer / seed proximity), a risk-score gauge, and a Node2Vec-powered "Similar Wallets" panel
 - **Transactions** — Transaction browser with I/O flow
-- **Ingest** — File upload + pipeline execution
-- **Settings** — Forensic threshold configuration
+- **Ingest** — File upload, synthetic sample generation, or a live fetch of real Blockstream data, then pipeline execution
+- **Settings** — Forensic threshold configuration (all five thresholds are live) + a Seed Watchlist tab for maintaining known-illicit wallets that risk propagation spreads from
 
 ## 📁 Project Structure
 
@@ -107,14 +114,20 @@ Prototype/
 ├── docker-compose.yml
 ├── backend/
 │   ├── app/
-│   │   ├── main.py          # FastAPI entry
-│   │   ├── config.py        # Settings
-│   │   ├── database.py      # DuckDB manager
-│   │   ├── models/          # Pydantic schemas
-│   │   ├── ingestion/       # CSV/JSON/XML parser + loader
-│   │   ├── graph/           # NetworkX + Louvain
-│   │   ├── ml/              # Autoencoder + Node2Vec + SHAP
-│   │   └── routers/         # FastAPI endpoints
+│   │   ├── main.py             # FastAPI entry
+│   │   ├── config.py           # Static env-based settings
+│   │   ├── runtime_settings.py # Effective settings (env defaults + live Settings-page overrides)
+│   │   ├── database.py         # DuckDB manager + schema/migrations
+│   │   ├── models/              # Pydantic schemas
+│   │   ├── ingestion/            # parser / validator / enricher / loader
+│   │   │   └── real_fetcher.py   # Real Bitcoin data via Blockstream's Esplora API
+│   │   ├── graph/
+│   │   │   ├── builder.py           # Entity graph construction
+│   │   │   ├── clustering.py        # Louvain + Node2Vec-based cluster refinement
+│   │   │   ├── patterns.py          # Peeling-chain / CoinJoin / consolidation-hub detectors
+│   │   │   └── risk_propagation.py  # BFS risk propagation from seed wallets
+│   │   ├── ml/                  # Autoencoder + Node2Vec + SHAP
+│   │   └── routers/             # FastAPI endpoints
 │   └── scripts/
 │       └── generate_synthetic.py
 └── frontend/
