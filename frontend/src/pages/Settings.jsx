@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getSettings, updateSettings, resetSettings, purgeCache } from '../services/api';
+import Icon from '../components/Icon';
 
 const settingsSections = [
   { id: 'thresholds', label: 'Forensic Thresholds' },
@@ -114,9 +115,9 @@ export default function Settings() {
                   <p>Maximum hop distance to consider a wallet "exposed" to known DNM entities.</p>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-                  <button className="btn btn-outline" style={{ padding: '4px 10px', minWidth: 0 }}
+                  <button className="btn btn-outline" style={{ padding: '4px 8px', minWidth: 0 }}
                     onClick={() => updateField('darknet_proximity_hops', Math.max(1, Number(settings.darknet_proximity_hops || 3) - 1))}>
-                    −
+                    <Icon name="minus" size={12} />
                   </button>
                   <span style={{
                     fontFamily: 'var(--font-mono)', fontSize: 'var(--text-md)',
@@ -125,9 +126,9 @@ export default function Settings() {
                   }}>
                     {settings.darknet_proximity_hops || 3} Hops
                   </span>
-                  <button className="btn btn-outline" style={{ padding: '4px 10px', minWidth: 0 }}
+                  <button className="btn btn-outline" style={{ padding: '4px 8px', minWidth: 0 }}
                     onClick={() => updateField('darknet_proximity_hops', Math.min(10, Number(settings.darknet_proximity_hops || 3) + 1))}>
-                    +
+                    <Icon name="plus" size={12} />
                   </button>
                 </div>
               </div>
@@ -207,7 +208,7 @@ export default function Settings() {
               </div>
 
               <div className="danger-zone">
-                <h3 style={{ marginBottom: 'var(--space-lg)' }}>⚠ System Reset</h3>
+                <h3 style={{ marginBottom: 'var(--space-lg)' }}><Icon name="alertTriangle" size={13} /> System Reset</h3>
                 <div className="settings-row" style={{ borderBottom: 'none' }}>
                   <div className="settings-row-info">
                     <h3 style={{ color: 'var(--text-primary)' }}>Purge Local Cache</h3>

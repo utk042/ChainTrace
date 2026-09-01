@@ -3,6 +3,7 @@ import { SigmaContainer, useLoadGraph, useSigma } from '@react-sigma/core';
 import '@react-sigma/core/lib/style.css';
 import Graph from 'graphology';
 import { getGraphData, getSubgraph, searchGraph } from '../services/api';
+import Icon from '../components/Icon';
 
 function LoadGraphComponent({ graphData }) {
   const loadGraph = useLoadGraph();
@@ -115,20 +116,10 @@ export default function GraphExplorer() {
 
   return (
     <div style={{ height: 'calc(100vh - var(--topbar-height) - var(--statusbar-height))', position: 'relative' }}>
-      {/* Legend */}
-      <div className="graph-legend">
-        {riskLegend.map(l => (
-          <div key={l.label} className="legend-item">
-            <div className="legend-dot" style={{ background: l.color }} />
-            <span>{l.label}</span>
-          </div>
-        ))}
-      </div>
-
       {/* Controls */}
       <div className="graph-controls">
         <div className="search-bar" style={{ width: 260, background: 'var(--bg-secondary)' }}>
-          <span style={{ opacity: 0.4 }}>🔍</span>
+          <Icon name="search" size={14} style={{ opacity: 0.5 }} />
           <input
             type="text" placeholder="Search node..."
             value={searchQuery}
@@ -163,8 +154,17 @@ export default function GraphExplorer() {
         )}
 
         <button className="btn btn-outline" onClick={handleReset} style={{ fontSize: 'var(--text-xs)' }}>
-          ↻ Reset View
+          <Icon name="rotateCcw" size={13} /> Reset View
         </button>
+
+        <div className="graph-legend">
+          {riskLegend.map(l => (
+            <div key={l.label} className="legend-item">
+              <div className="legend-dot" style={{ background: l.color }} />
+              <span>{l.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Sigma.js Canvas */}
@@ -195,9 +195,9 @@ export default function GraphExplorer() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
             <h3 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>Node Details</h3>
             <span
-              style={{ cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--text-lg)' }}
+              style={{ cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex' }}
               onClick={() => setSelectedNode(null)}
-            >×</span>
+            ><Icon name="close" size={16} /></span>
           </div>
 
           <div style={{ marginBottom: 'var(--space-md)' }}>

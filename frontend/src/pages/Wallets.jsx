@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getWallets, getWalletDetail } from '../services/api';
+import Icon from '../components/Icon';
 
 export default function Wallets() {
   const [wallets, setWallets] = useState([]);
@@ -42,7 +43,7 @@ export default function Wallets() {
 
       <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-xl)' }}>
         <div className="search-bar" style={{ width: 300 }}>
-          <span style={{ opacity: 0.4 }}>🔍</span>
+          <Icon name="search" size={14} style={{ opacity: 0.5 }} />
           <input
             type="text" placeholder="Search wallet address..."
             value={search} onChange={e => setSearch(e.target.value)}
@@ -103,9 +104,9 @@ export default function Wallets() {
               </div>
 
               <div className="pagination">
-                <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
+                <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}><Icon name="chevronLeft" size={13} /> Prev</button>
                 <span className="page-info">Page {page} of {Math.max(1, Math.ceil(total / 20))}</span>
-                <button disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(p => p + 1)}>Next →</button>
+                <button disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(p => p + 1)}>Next <Icon name="chevronRight" size={13} /></button>
               </div>
             </>
           )}
@@ -115,12 +116,22 @@ export default function Wallets() {
           <div className="card slide-in" style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-md)' }}>
               <h3 style={{ fontSize: 'var(--text-md)' }}>Wallet Detail</h3>
-              <span style={{ cursor: 'pointer', color: 'var(--text-tertiary)' }} onClick={() => { setDetail(null); setSelected(null); }}>×</span>
+              <span style={{ cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex' }} onClick={() => { setDetail(null); setSelected(null); }}>
+                <Icon name="close" size={16} />
+              </span>
             </div>
 
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', wordBreak: 'break-all',
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8,
+              fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)',
               background: 'var(--bg-tertiary)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)' }}>
-              {detail.address}
+              <span style={{ wordBreak: 'break-all' }}>{detail.address}</span>
+              <span
+                style={{ cursor: 'pointer', color: 'var(--text-tertiary)', flexShrink: 0, display: 'flex' }}
+                title="Copy address"
+                onClick={() => navigator.clipboard?.writeText(detail.address)}
+              >
+                <Icon name="copy" size={13} />
+              </span>
             </div>
 
             {detail.risk_tier !== 'Normal' && (

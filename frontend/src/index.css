@@ -240,9 +240,9 @@ a:hover {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  width: 44px;
-  height: 40px;
+  gap: 4px;
+  width: 56px;
+  height: 44px;
   border-left: 2px solid transparent;
   color: var(--text-tertiary);
   cursor: pointer;
@@ -261,17 +261,16 @@ a:hover {
   border-left-color: var(--accent);
 }
 
-.nav-item .nav-key {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 600;
-}
-
 .nav-item .nav-label {
-  font-size: 7.5px;
-  letter-spacing: 0.03em;
+  font-family: var(--font-mono);
+  font-size: 7px;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--text-tertiary);
+  max-width: 52px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .nav-item.active .nav-label {
@@ -957,6 +956,9 @@ a:hover {
 }
 
 .pagination button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 6px var(--space-md);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-sm);
@@ -997,26 +999,26 @@ a:hover {
   position: absolute;
   top: var(--space-lg);
   left: var(--space-lg);
+  max-width: 260px;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: var(--space-sm);
   z-index: 10;
 }
 
+/* Anchored under the other controls (not centered over the canvas) so it
+   can never end up hidden behind the node-inspector panel on the right. */
 .graph-legend {
-  position: absolute;
-  top: var(--space-lg);
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
-  gap: var(--space-xl);
-  z-index: 10;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-md);
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
-  padding: 8px 16px;
+  padding: 10px 12px;
 }
 
 .legend-item {
@@ -1151,13 +1153,16 @@ a:hover {
 }
 
 .step-tracker-item::after {
+  /* Spans this item's circle-center to the next item's circle-center;
+     the (opaque) circles sit above it (z-index) and mask the overlap. */
   content: '';
   position: absolute;
-  top: 17px;
-  left: calc(50% + 24px);
-  right: calc(-50% + 24px);
+  top: 16px;
+  left: 50%;
+  width: 100%;
   height: 1px;
   background: var(--border-primary);
+  z-index: 0;
 }
 
 .step-tracker-item:last-child::after {
@@ -1242,8 +1247,8 @@ a:hover {
 }
 
 .dropzone-icon {
-  font-family: var(--font-mono);
-  font-size: 26px;
+  display: flex;
+  justify-content: center;
   margin-bottom: var(--space-md);
   color: var(--text-tertiary);
 }
@@ -1384,6 +1389,36 @@ a:hover {
    only density, columns and secondary chrome adapt below it.
    ═══════════════════════════════════════════════════════════════ */
 
+/* ─── Narrow desktop (<= 1240px) — shed the TopBar's optional chrome
+   before anything is forced to silently clip ─── */
+
+@media (max-width: 1240px) {
+  .topbar-right .search-bar {
+    display: none;
+  }
+}
+
+/* ─── Narrow desktop (<= 1040px) ─── */
+
+@media (max-width: 1040px) {
+  .topbar-meta-item:nth-child(n+3) {
+    display: none;
+  }
+}
+
+/* ─── Narrow desktop (<= 840px) ─── */
+
+@media (max-width: 840px) {
+  .topbar-meta {
+    display: none;
+  }
+
+  .topbar-status {
+    border-left: none;
+    padding-left: 0;
+  }
+}
+
 /* ─── Tablet (<= 992px) ─── */
 
 @media (max-width: 992px) {
@@ -1449,14 +1484,6 @@ a:hover {
   /* Top Bar */
   .topbar {
     padding: 0 var(--space-md);
-  }
-
-  .topbar-meta-item:nth-child(n+3) {
-    display: none;
-  }
-
-  .topbar-right .search-bar {
-    display: none;
   }
 
   /* Page Content */
@@ -1526,6 +1553,7 @@ a:hover {
     top: var(--space-sm);
     left: var(--space-sm);
     right: var(--space-sm);
+    max-width: none;
     gap: var(--space-xs);
   }
 
@@ -1640,15 +1668,6 @@ a:hover {
 
   .search-bar {
     width: 100% !important;
-  }
-
-  .topbar-meta {
-    display: none;
-  }
-
-  .topbar-status {
-    border-left: none;
-    padding-left: 0;
   }
 
   .topbar-clock {

@@ -1,0 +1,57 @@
+// Minimal hand-authored stroke-icon set (24x24, currentColor) so the UI
+// never relies on unicode/emoji glyphs standing in for meaning.
+const PATHS = {
+  // Nav
+  grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+  alertTriangle: 'M12 3.5 21.5 20h-19zM12 9.5v5M12 17.5h.01',
+  wallet: 'M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2M3 7v10a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-4M3 7v0M16 13h3.5a1.5 1.5 0 0 1 0 3H16a1.5 1.5 0 0 1 0-3z',
+  graph: 'M6 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6.6 8.3 10.5 17M17.4 8.3 13.5 17M8 5h8',
+  swap: 'm4 8 4-4 4 4M8 4v13M20 16l-4 4-4-4M16 20V7',
+  uploadCloud: 'M7 18a4 4 0 0 1-1-7.9 5 5 0 0 1 9.8-1.7A4.5 4.5 0 0 1 17 18H7zM12 11v7M9 14l3-3 3 3',
+  settings: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 17.6a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 13 1.65 1.65 0 0 0 3.16 12H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 7a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 2.68 1.65 1.65 0 0 0 10 1.16V1a2 2 0 1 1 4 0v.09c0 .68.4 1.28 1 1.51.6.24 1.32.13 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06c-.46.5-.57 1.22-.33 1.82.23.6.83 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.68 0-1.28.4-1.51 1z',
+
+  // Generic
+  search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
+  close: 'M6 6l12 12M18 6L6 18',
+  copy: 'M9 9h10v10H9zM5 15V5h10',
+  chevronLeft: 'M14.5 5 8 12l6.5 7',
+  chevronRight: 'M9.5 5 16 12l-6.5 7',
+  download: 'M12 3v12M7 10l5 5 5-5M4 19h16',
+  upload: 'M12 15V3M7 8l5-5 5 5M4 19h16',
+  play: 'M6.5 4.5v15l13-7.5z',
+  sparkles: 'M11 3l1.2 3.4L15.5 7.7l-3.3 1.3L11 12.5l-1.2-3.5L6.5 7.7l3.3-1.3zM18 14l.8 2.3 2.2.9-2.2.9-.8 2.3-.8-2.3-2.2-.9 2.2-.9z',
+  rotateCcw: 'M4 4v6h6M4.5 13.5A8 8 0 1 0 6 6.3L4 10',
+  plus: 'M12 5v14M5 12h14',
+  minus: 'M5 12h14',
+  check: 'M4 12.5l5 5L20 6.5',
+  circle: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z',
+  circleDot: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 12h.01',
+  flag: 'M5 21V4M5 4h13l-3 4 3 4H5',
+};
+
+const FILLED = new Set(['play']);
+
+export default function Icon({ name, size = 16, strokeWidth = 1.75, style, className, title }) {
+  const d = PATHS[name];
+  if (!d) return null;
+  const filled = FILLED.has(name);
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth={filled ? 0 : strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0, ...style }}
+      className={className}
+      role={title ? 'img' : 'presentation'}
+      aria-hidden={title ? undefined : true}
+    >
+      {title && <title>{title}</title>}
+      <path d={d} />
+    </svg>
+  );
+}

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { uploadFile, runPipeline, getPipelineStatus, generateSampleData } from '../services/api';
+import Icon from '../components/Icon';
 
 export default function Ingest() {
   const [file, setFile] = useState(null);
@@ -106,7 +107,7 @@ export default function Ingest() {
     else if (errored && progress >= s.min) status = progress < nextMin ? 'error' : 'done';
     else if (progress >= nextMin) status = 'done';
     else if (progress >= s.min && pipelineStatus?.status === 'running') status = 'active';
-    return { ...s, status, icon: status === 'done' ? '✓' : status === 'error' ? '✕' : status === 'active' ? '●' : '○' };
+    return { ...s, status, icon: status === 'done' ? 'check' : status === 'error' ? 'close' : status === 'active' ? 'circleDot' : 'circle' };
   });
 
   return (
@@ -146,7 +147,7 @@ export default function Ingest() {
           {steps.map(s => (
             <div className="step-tracker-item" key={s.name}>
               <div className="step-tracker-col">
-                <div className={`step-circle ${s.status}`}>{s.icon}</div>
+                <div className={`step-circle ${s.status}`}><Icon name={s.icon} size={15} /></div>
                 <span className="step-name" style={{
                   color: s.status === 'done' ? 'var(--accent-green)' : s.status === 'active' ? 'var(--accent-elevated)'
                     : s.status === 'error' ? 'var(--accent-critical)' : 'var(--text-tertiary)',
@@ -165,7 +166,7 @@ export default function Ingest() {
         onDragOver={e => e.preventDefault()}
         onClick={() => fileInputRef.current?.click()}
       >
-        <div className="dropzone-icon">⇧</div>
+        <div className="dropzone-icon"><Icon name="uploadCloud" size={26} /></div>
         <div className="dropzone-text">
           {file ? file.name : 'DRAG .CSV / .JSON / .XML BLOCKCHAIN EXPORT HERE'}
         </div>
@@ -188,21 +189,23 @@ export default function Ingest() {
           disabled={!file}
           onClick={handleUpload}
         >
-          ↑ Upload File
+          <Icon name="upload" size={13} /> Upload File
         </button>
         <button
           className="btn btn-primary"
           disabled={!uploadStatus?.path}
           onClick={() => handleRunPipeline(uploadStatus?.path)}
         >
-          ▶ Run Pipeline
+          <Icon name="play" size={13} /> Run Pipeline
         </button>
         <button
           className="btn btn-outline"
           disabled={isProcessing}
           onClick={handleGenerateSample}
         >
-          {isProcessing ? '⏳ Processing Pipeline...' : '✦ Generate Sample & Run'}
+          {isProcessing
+            ? <><span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> Processing Pipeline...</>
+            : <><Icon name="sparkles" size={13} /> Generate Sample &amp; Run</>}
         </button>
       </div>
 
