@@ -15,6 +15,7 @@ from app.ingestion.parser import parse_file
 from app.ingestion.validator import validate_records
 from app.ingestion.enricher import get_enricher
 from app.ingestion.loader import load_transactions, clear_all_data
+from app.ingestion.real_fetcher import fetch_recent_real_transactions, EsploraError
 from app.ml.trainer import run_full_pipeline
 
 router = APIRouter(prefix="/api/ingest", tags=["Ingest"])
@@ -122,6 +123,46 @@ async def generate_sample_data(count: int = 5000):
         "csv_path": str(output_dir / "transactions.csv"),
         "json_path": str(output_dir / "transactions.json"),
         "message": f"Generated {len(records)} synthetic transactions",
+    }
+
+
+@router.post("/fetch-real")
+async def fetch_real_data(max_transactions: int = 500, max_blocks: int = 10):
+    """
+    Pull genuine, verifiable on-chain Bitcoin transactions from Blockstream's
+    public Esplora API (recent confirmed blocks) and save them in
+    ChainTrace's ingestion format — real txids, real wallet addresses, real
+    amounts. Every txid returned can be looked up on any block explorer.
+
+    Requires outbound internet access to blockstream.info. There is no
+    real-data source for the network-layer (IP/port) fields — they are
+    intentionally left blank; see app/ingestion/real_fetcher.py.
+    """
+    try:
+        records = list(fetch_recent_real_transactions(
+            max_transactions=max_transactions, max_blocks=max_blocks,
+        ))
+    except EsploraError as e:
+        return {"error": f"Could not reach Blockstream's API: {e}"}
+
+    if not records:
+        return {"error": "No usable transactions found in the scanned blocks. Try increasing max_blocks."}
+
+    import sys
+    if str(settings.BASE_DIR) not in sys.path:
+        sys.path.insert(0, str(settings.BASE_DIR))
+    from scripts.generate_synthetic import save_csv, save_json
+
+    output_dir = settings.DATA_DIR / "real"
+    save_csv(records, output_dir / "transactions.csv")
+    save_json(records, output_dir / "transactions.json")
+
+    return {
+        "count": len(records),
+        "csv_path": str(output_dir / "transactions.csv"),
+        "json_path": str(output_dir / "transactions.json"),
+        "message": f"Fetched {len(records)} real, verifiable Bitcoin transactions from the live blockchain.",
+        "source": "Blockstream Esplora API (blockstream.info)",
     }
 
 

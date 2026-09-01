@@ -27,6 +27,7 @@ const PATHS = {
   circle: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z',
   circleDot: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 12h.01',
   flag: 'M5 21V4M5 4h13l-3 4 3 4H5',
+  globe: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM4 12h16M12 4a13 13 0 0 1 0 16M12 4a13 13 0 0 0 0 16',
 };
 
 const FILLED = new Set(['play']);

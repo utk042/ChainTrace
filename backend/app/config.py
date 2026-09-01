@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # ── SHAP ───────────────────────────────────────────────────────────
     SHAP_BACKGROUND_SIZE: int = 100
 
+    # ── Real Bitcoin data source (Blockstream's public Esplora API —
+    #    free, no auth, no rate-limit key required) ────────────────────
+    ESPLORA_API_BASE: str = "https://blockstream.info/api"
+    ESPLORA_REQUEST_TIMEOUT: float = 15.0
+    ESPLORA_REQUEST_DELAY: float = 0.25  # be a good API citizen between calls
+
     model_config = {"env_prefix": "CT_", "env_file": ".env"}
 
 
