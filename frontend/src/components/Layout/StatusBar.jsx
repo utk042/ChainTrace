@@ -11,11 +11,11 @@ export default function StatusBar() {
   return (
     <div className="statusbar">
       <div className="statusbar-left">
-        <span>System: {stats?.system_health || 'CONNECTING...'}</span>
-        <span>|</span>
-        <span>Model: {stats?.model_name || '—'}</span>
-        <span>|</span>
-        <span>Flagged: {stats?.flagged_entities?.toLocaleString() || '0'}</span>
+        <span>SYSTEM <b style={{ color: 'var(--accent-green)' }}>{stats?.system_health || 'CONNECTING...'}</b></span>
+        <span className="topbar-sep">|</span>
+        <span>MODEL {stats?.model_name || '—'}</span>
+        <span className="topbar-sep">|</span>
+        <span>FLAGGED {stats?.flagged_entities?.toLocaleString() || '0'}</span>
       </div>
       <div className="statusbar-right">
         <span>Documentation</span>

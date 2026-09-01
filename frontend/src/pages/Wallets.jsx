@@ -90,7 +90,7 @@ export default function Wallets() {
                         <td>{w.fan_in_degree}</td>
                         <td>{w.fan_out_degree}</td>
                         <td>{w.velocity_1h}</td>
-                        <td style={{ color: w.anomaly_score >= 90 ? '#FF4D5A' : w.anomaly_score >= 70 ? '#FF6B7A' : w.anomaly_score > 0 ? '#FFB84D' : 'inherit' }}>
+                        <td style={{ color: w.anomaly_score >= 90 ? 'var(--accent-critical)' : w.anomaly_score >= 70 ? 'var(--accent-high)' : w.anomaly_score > 0 ? 'var(--accent-elevated)' : 'inherit' }}>
                           {w.anomaly_score?.toFixed(1)}
                         </td>
                         <td>
@@ -124,12 +124,34 @@ export default function Wallets() {
             </div>
 
             {detail.risk_tier !== 'Normal' && (
-              <div style={{ marginBottom: 'var(--space-lg)' }}>
-                <span className={`badge ${detail.risk_tier?.toLowerCase()}`}>{detail.risk_tier}</span>
-                <span style={{ marginLeft: 8, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', fontWeight: 700,
-                  color: detail.anomaly_score >= 90 ? '#FF4D5A' : '#FF6B7A' }}>
-                  {detail.anomaly_score?.toFixed(1)}%
-                </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-lg)', padding: 'var(--space-lg) 0',
+                borderTop: '1px solid var(--border-primary)', borderBottom: '1px solid var(--border-primary)', marginBottom: 'var(--space-lg)' }}>
+                {(() => {
+                  const gaugeColor = detail.anomaly_score >= 90 ? 'var(--accent-critical)'
+                    : detail.anomaly_score >= 70 ? 'var(--accent-high)' : 'var(--accent-elevated)';
+                  const pct = Math.max(0, Math.min(100, detail.anomaly_score || 0));
+                  return (
+                    <div style={{
+                      width: 66, height: 66, borderRadius: '50%', flexShrink: 0,
+                      background: `conic-gradient(${gaugeColor} 0% ${pct}%, var(--border-primary) ${pct}% 100%)`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <div style={{
+                        width: 50, height: 50, borderRadius: '50%', background: 'var(--bg-card)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700, color: 'var(--text-primary)',
+                      }}>{pct.toFixed(0)}</div>
+                    </div>
+                  );
+                })()}
+                <div>
+                  <span className={`badge ${detail.risk_tier?.toLowerCase()}`}>{detail.risk_tier}</span>
+                  {detail.cluster_id != null && (
+                    <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+                      Cluster <span style={{ color: 'var(--text-primary)' }}>{detail.cluster_id}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

@@ -90,11 +90,73 @@ export default function Ingest() {
   const progressColor = pipelineStatus?.status === 'error' ? 'var(--accent-critical)'
     : pipelineStatus?.status === 'completed' ? 'var(--accent-green)' : undefined;
 
+  // Derived from the real progress checkpoints the backend reports
+  // (clear=5, parse=10, validate=20, enrich=30, load=40, ML analysis=50→99, done=100).
+  const progress = pipelineStatus?.progress || 0;
+  const errored = pipelineStatus?.status === 'error';
+  const steps = [
+    { name: 'PARSE & VALIDATE', detail: 'schema + records', min: 0, max: 20 },
+    { name: 'ENRICH', detail: 'GeoIP lookup', min: 20, max: 30 },
+    { name: 'LOAD', detail: 'DuckDB insert', min: 30, max: 40 },
+    { name: 'ML ANALYSIS', detail: 'graph · cluster · score · explain', min: 40, max: 100 },
+  ].map((s, i, arr) => {
+    const nextMin = arr[i + 1]?.min ?? 100;
+    let status = 'pending';
+    if (pipelineStatus?.status === 'completed') status = 'done';
+    else if (errored && progress >= s.min) status = progress < nextMin ? 'error' : 'done';
+    else if (progress >= nextMin) status = 'done';
+    else if (progress >= s.min && pipelineStatus?.status === 'running') status = 'active';
+    return { ...s, status, icon: status === 'done' ? '✓' : status === 'error' ? '✕' : status === 'active' ? '●' : '○' };
+  });
+
   return (
     <div className="page-content fade-in">
       <div className="page-header">
         <h1 className="page-title">Data Ingestion</h1>
       </div>
+
+      {pipelineStatus?.run_id && (
+        <div className="run-header">
+          <div className="run-header-meta">
+            <span>RUN ID <b>{pipelineStatus.run_id}</b></span>
+            {file && <span>DATASET <b>{file.name}</b></span>}
+          </div>
+          <span
+            className="topbar-status"
+            style={{
+              color: pipelineStatus.status === 'completed' ? 'var(--accent-green)'
+                : pipelineStatus.status === 'error' ? 'var(--accent-critical)' : 'var(--accent-elevated)',
+            }}
+          >
+            <span
+              className="pulse-dot"
+              style={{
+                background: pipelineStatus.status === 'completed' ? 'var(--accent-green)'
+                  : pipelineStatus.status === 'error' ? 'var(--accent-critical)' : 'var(--accent-elevated)',
+                animation: pipelineStatus.status === 'running' ? undefined : 'none',
+              }}
+            />
+            {pipelineStatus.status?.toUpperCase()}
+          </span>
+        </div>
+      )}
+
+      {(pipelineStatus?.status === 'running' || pipelineStatus?.status === 'completed' || pipelineStatus?.status === 'error') && (
+        <div className="step-tracker">
+          {steps.map(s => (
+            <div className="step-tracker-item" key={s.name}>
+              <div className="step-tracker-col">
+                <div className={`step-circle ${s.status}`}>{s.icon}</div>
+                <span className="step-name" style={{
+                  color: s.status === 'done' ? 'var(--accent-green)' : s.status === 'active' ? 'var(--accent-elevated)'
+                    : s.status === 'error' ? 'var(--accent-critical)' : 'var(--text-tertiary)',
+                }}>{s.name}</span>
+                <span className="step-detail">{s.detail}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Dropzone */}
       <div
@@ -103,12 +165,12 @@ export default function Ingest() {
         onDragOver={e => e.preventDefault()}
         onClick={() => fileInputRef.current?.click()}
       >
-        <div className="dropzone-icon">📁</div>
+        <div className="dropzone-icon">⇧</div>
         <div className="dropzone-text">
-          {file ? file.name : 'Drop a CSV, JSON, or XML file here'}
+          {file ? file.name : 'DRAG .CSV / .JSON / .XML BLOCKCHAIN EXPORT HERE'}
         </div>
         <div className="dropzone-sub">
-          {file ? `${(file.size / 1024).toFixed(1)} KB` : 'or click to browse'}
+          {file ? `${(file.size / 1024).toFixed(1)} KB` : 'or click to browse — processed entirely offline'}
         </div>
         <input
           ref={fileInputRef}

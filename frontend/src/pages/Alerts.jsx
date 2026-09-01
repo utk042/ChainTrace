@@ -73,8 +73,8 @@ export default function Alerts() {
                   onClick={() => setFilters(f => ({ ...f, risk_tier: t }))}
                 >
                   {t ? (
-                    <><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2,
-                      background: t === 'Critical' ? '#FF4D5A' : t === 'High' ? '#FF6B7A' : '#FFB84D',
+                    <><span style={{ display: 'inline-block', width: 8, height: 8,
+                      background: t === 'Critical' ? 'var(--accent-critical)' : t === 'High' ? 'var(--accent-high)' : 'var(--accent-elevated)',
                       marginRight: 4 }} />{t}</>
                   ) : 'All'}
                 </span>
@@ -140,7 +140,7 @@ export default function Alerts() {
                       {alert.model}
                     </td>
                     <td>
-                      <span style={{ color: alert.confidence >= 90 ? '#FF4D5A' : alert.confidence >= 70 ? '#FF6B7A' : '#FFB84D' }}>
+                      <span style={{ color: alert.confidence >= 90 ? 'var(--accent-critical)' : alert.confidence >= 70 ? 'var(--accent-high)' : 'var(--accent-elevated)' }}>
                         {alert.confidence?.toFixed(1)}%
                       </span>
                     </td>
