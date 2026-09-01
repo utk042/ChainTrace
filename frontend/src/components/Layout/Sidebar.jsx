@@ -1,16 +1,17 @@
 import { NavLink } from 'react-router-dom';
+import Icon from '../Icon';
 
 const navItems = [
-  { path: '/', label: 'Dashboard', key: 'D', end: true },
-  { path: '/alerts', label: 'Alerts', key: 'A' },
-  { path: '/wallets', label: 'Wallets', key: 'W' },
-  { path: '/graph', label: 'Graph', key: 'G' },
-  { path: '/transactions', label: 'Txns', key: 'T' },
-  { path: '/ingest', label: 'Ingest', key: 'I' },
+  { path: '/', label: 'Dashboard', icon: 'grid', end: true },
+  { path: '/alerts', label: 'Alerts', icon: 'alertTriangle' },
+  { path: '/wallets', label: 'Wallets', icon: 'wallet' },
+  { path: '/graph', label: 'Graph', icon: 'graph' },
+  { path: '/transactions', label: 'Txns', icon: 'swap' },
+  { path: '/ingest', label: 'Ingest', icon: 'uploadCloud' },
 ];
 
 const bottomItems = [
-  { path: '/settings', label: 'Settings', key: 'S' },
+  { path: '/settings', label: 'Settings', icon: 'settings' },
 ];
 
 export default function Sidebar() {
@@ -27,7 +28,7 @@ export default function Sidebar() {
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
             title={item.label}
           >
-            <span className="nav-key">{item.key}</span>
+            <Icon name={item.icon} size={17} />
             <span className="nav-label">{item.label}</span>
           </NavLink>
         ))}
@@ -41,7 +42,7 @@ export default function Sidebar() {
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
             title={item.label}
           >
-            <span className="nav-key">{item.key}</span>
+            <Icon name={item.icon} size={17} />
             <span className="nav-label">{item.label}</span>
           </NavLink>
         ))}
