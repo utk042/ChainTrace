@@ -1,6 +1,9 @@
 """
 ChainTrace Forensics — Feature Engineering
-Computes 13 behavioral features per wallet address from DuckDB data.
+Computes 16 behavioral + structural features per wallet address from
+DuckDB data: 13 general behavioral stats, plus 3 from the dedicated
+pattern/propagation detectors in app/graph/patterns.py and
+app/graph/risk_propagation.py (merged in via merge_pattern_features).
 """
 
 import numpy as np
@@ -23,6 +26,9 @@ FEATURE_NAMES = [
     "unique_ips",
     "unique_countries",
     "age_days",
+    "peel_chain_depth",
+    "mixer_interaction_count",
+    "darknet_proximity_score",
 ]
 
 
@@ -176,6 +182,11 @@ def save_features_to_db(features: dict[str, dict], con: duckdb.DuckDBPyConnectio
                 None,  # cluster_id (set later)
                 0.0,   # anomaly_score (set later)
                 "Normal",  # risk_tier (set later)
+                f.get("peel_chain_depth", 0),
+                f.get("peel_chain_role"),
+                f.get("mixer_interaction_count", 0),
+                f.get("darknet_proximity_hops"),
+                f.get("darknet_proximity_score", 0.0),
             ))
 
         con.executemany("""
@@ -185,8 +196,11 @@ def save_features_to_db(features: dict[str, dict], con: duckdb.DuckDBPyConnectio
              velocity_1h, velocity_24h, round_amount_ratio,
              unique_ips, unique_countries,
              first_seen, last_seen, age_days,
-             cluster_id, anomaly_score, risk_tier)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP, ?::TIMESTAMP, ?, ?, ?, ?)
+             cluster_id, anomaly_score, risk_tier,
+             peel_chain_depth, peel_chain_role, mixer_interaction_count,
+             darknet_proximity_hops, darknet_proximity_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP, ?::TIMESTAMP, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?)
         """, rows)
 
         return len(rows)
@@ -245,3 +259,49 @@ def _is_round_amount(amount: float) -> bool:
     """Check if an amount is a 'round' number (structuring indicator)."""
     round_values = {0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0}
     return amount in round_values or (amount > 0 and amount == round(amount, 0))
+
+
+def merge_pattern_features(
+    features: dict[str, dict],
+    peel_data: dict[str, dict],
+    mixer_counts: dict[str, int],
+    proximity_data: dict[str, dict],
+) -> None:
+    """
+    Mutates `features` in place, filling in the three structural-detector
+    features (default 0/absent for wallets the detectors didn't flag) so
+    every wallet has a complete FEATURE_NAMES vector before it hits the
+    autoencoder. Also creates feature entries for wallets that only appear
+    in a seed-proximity or pattern result but weren't otherwise active
+    enough to have behavioral features computed (rare, but keeps flagged
+    addresses from silently disappearing).
+    """
+    def ensure(addr: str) -> dict:
+        if addr not in features:
+            features[addr] = _empty_wallet_feature_row()
+        return features[addr]
+
+    for addr, d in peel_data.items():
+        w = ensure(addr)
+        w["peel_chain_depth"] = d["peel_chain_depth"]
+        w["peel_chain_role"] = d["peel_chain_role"]
+
+    for addr, count in mixer_counts.items():
+        ensure(addr)["mixer_interaction_count"] = count
+
+    for addr, d in proximity_data.items():
+        w = ensure(addr)
+        w["darknet_proximity_hops"] = d["darknet_proximity_hops"]
+        w["darknet_proximity_score"] = d["darknet_proximity_score"]
+
+
+def _empty_wallet_feature_row() -> dict:
+    """A zeroed-out feature row for a wallet that a structural detector
+    flagged but that had no computed behavioral features (e.g. a seed
+    wallet with too little on-chain activity of its own)."""
+    row = {name: 0 for name in FEATURE_NAMES}
+    row.update({
+        "first_seen": None, "last_seen": None,
+        "peel_chain_role": None, "darknet_proximity_hops": None,
+    })
+    return row

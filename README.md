@@ -52,7 +52,7 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173 and navigate to **Ingest → Generate Sample & Run** to trigger the full pipeline with fabricated demo data, or **Ingest → Fetch Real Blockchain Data & Run** to pull genuine on-chain transactions instead — see below.
+Then open http://localhost:5173 and navigate to **Ingest → Generate Sample & Run** to trigger the full pipeline with fabricated demo data, or **Ingest → Fetch Real Blockchain Data & Run** to pull genuine on-chain transactions instead — see below. The first run trains the autoencoder and Node2Vec embeddings from scratch (~1-3 minutes for the default 5K-record demo set); nothing pretrained ships in the repo, since a checkpoint only stays valid for the exact feature schema and dataset it was trained on.
 
 ### Using real data instead of the synthetic demo set
 

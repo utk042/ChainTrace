@@ -55,4 +55,11 @@ export const updateSettings = (updates) => api.put('/api/settings', updates);
 export const resetSettings = () => api.post('/api/settings/reset');
 export const purgeCache = () => api.post('/api/settings/purge-cache');
 
+// ─── Seed / Watchlist Wallets (risk propagation) ────────────────
+export const getSeedWallets = () => api.get('/api/settings/seed-wallets');
+export const addSeedWallet = (address, label = '') =>
+  api.post(`/api/settings/seed-wallets?address=${encodeURIComponent(address)}&label=${encodeURIComponent(label)}`);
+export const removeSeedWallet = (address) =>
+  api.delete(`/api/settings/seed-wallets/${encodeURIComponent(address)}`);
+
 export default api;

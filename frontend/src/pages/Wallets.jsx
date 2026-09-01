@@ -73,6 +73,7 @@ export default function Wallets() {
                       <th>Fan In</th>
                       <th>Fan Out</th>
                       <th>Velocity/h</th>
+                      <th>Patterns</th>
                       <th>Score</th>
                       <th>Risk</th>
                     </tr>
@@ -91,6 +92,23 @@ export default function Wallets() {
                         <td>{w.fan_in_degree}</td>
                         <td>{w.fan_out_degree}</td>
                         <td>{w.velocity_1h}</td>
+                        <td style={{ display: 'flex', gap: 6 }}>
+                          {w.peel_chain_role === 'chain' && (
+                            <span title={`Peeling chain, depth ${w.peel_chain_depth}`}>
+                              <Icon name="alertTriangle" size={13} style={{ color: 'var(--accent-elevated)' }} />
+                            </span>
+                          )}
+                          {w.mixer_interaction_count > 0 && (
+                            <span title={`Mixer/CoinJoin interaction (${w.mixer_interaction_count})`}>
+                              <Icon name="graph" size={13} style={{ color: 'var(--accent-elevated)' }} />
+                            </span>
+                          )}
+                          {w.darknet_proximity_hops != null && (
+                            <span title={`${w.darknet_proximity_hops} hop(s) from a watchlisted wallet`}>
+                              <Icon name="flag" size={13} style={{ color: 'var(--accent-critical)' }} />
+                            </span>
+                          )}
+                        </td>
                         <td style={{ color: w.anomaly_score >= 90 ? 'var(--accent-critical)' : w.anomaly_score >= 70 ? 'var(--accent-high)' : w.anomaly_score > 0 ? 'var(--accent-elevated)' : 'inherit' }}>
                           {w.anomaly_score?.toFixed(1)}
                         </td>
@@ -156,13 +174,52 @@ export default function Wallets() {
                   );
                 })()}
                 <div>
-                  <span className={`badge ${detail.risk_tier?.toLowerCase()}`}>{detail.risk_tier}</span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <span className={`badge ${detail.risk_tier?.toLowerCase()}`}>{detail.risk_tier}</span>
+                    {detail.is_seed_wallet && <span className="badge critical">Watchlist Seed</span>}
+                  </div>
                   {detail.cluster_id != null && (
                     <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
                       Cluster <span style={{ color: 'var(--text-primary)' }}>{detail.cluster_id}</span>
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {(detail.peel_chain_role || detail.mixer_interaction_count > 0 || detail.darknet_proximity_hops != null) && (
+              <div style={{ marginBottom: 'var(--space-lg)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="card-title">Detected Patterns</div>
+                {detail.peel_chain_role && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)',
+                    padding: '8px 10px', background: 'var(--accent-elevated-bg)', border: '1px solid var(--accent-elevated)' }}>
+                    <Icon name="alertTriangle" size={13} style={{ color: 'var(--accent-elevated)', flexShrink: 0 }} />
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      {detail.peel_chain_role === 'chain'
+                        ? <>Peeling chain — <b style={{ color: 'var(--text-primary)' }}>depth {detail.peel_chain_depth}</b></>
+                        : 'Single peel-shaped transaction'}
+                    </span>
+                  </div>
+                )}
+                {detail.mixer_interaction_count > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)',
+                    padding: '8px 10px', background: 'var(--accent-elevated-bg)', border: '1px solid var(--accent-elevated)' }}>
+                    <Icon name="graph" size={13} style={{ color: 'var(--accent-elevated)', flexShrink: 0 }} />
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      Mixer/CoinJoin interaction — <b style={{ color: 'var(--text-primary)' }}>{detail.mixer_interaction_count}</b> signal(s)
+                    </span>
+                  </div>
+                )}
+                {detail.darknet_proximity_hops != null && !detail.is_seed_wallet && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)',
+                    padding: '8px 10px', background: 'var(--accent-critical-bg)', border: '1px solid var(--accent-critical-border)' }}>
+                    <Icon name="flag" size={13} style={{ color: 'var(--accent-critical)', flexShrink: 0 }} />
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      <b style={{ color: 'var(--text-primary)' }}>{detail.darknet_proximity_hops}</b> hop(s) from a watchlisted seed wallet
+                      {' '}(proximity {detail.darknet_proximity_score?.toFixed(2)})
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -185,6 +242,25 @@ export default function Wallets() {
                 </div>
               ))}
             </div>
+
+            {detail.similar_wallets?.length > 0 && (
+              <div style={{ marginBottom: 'var(--space-lg)' }}>
+                <div className="card-title" style={{ marginBottom: 'var(--space-sm)' }}>
+                  Similar Wallets <span style={{ color: 'var(--text-tertiary)', fontWeight: 400, textTransform: 'none' }}>— by graph embedding</span>
+                </div>
+                {detail.similar_wallets.map((s, i) => (
+                  <div key={i}
+                    onClick={() => handleSelect(s.address)}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer',
+                      fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)',
+                      padding: '6px 0', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-primary)' }}
+                  >
+                    <span>{s.address.length > 24 ? `${s.address.slice(0, 12)}...${s.address.slice(-8)}` : s.address}</span>
+                    <span style={{ color: 'var(--accent)' }}>{(s.similarity * 100).toFixed(0)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {detail.connected_ips?.length > 0 && (
               <div style={{ marginBottom: 'var(--space-lg)' }}>
