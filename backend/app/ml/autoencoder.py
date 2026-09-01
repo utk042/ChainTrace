@@ -212,7 +212,23 @@ class AnomalyDetector:
             return False
 
         checkpoint = torch.load(model_file, map_location=self.device, weights_only=False)
-        self.model.load_state_dict(checkpoint["model_state"])
+
+        # A checkpoint trained under an older feature schema (different
+        # FEATURE_NAMES length) has an incompatible input/output layer shape.
+        # Rather than crash on load_state_dict, discard it and let the caller
+        # retrain — self-healing across a feature-schema change.
+        checkpoint_dim = len(checkpoint.get("scaler_mean", []))
+        if checkpoint_dim != settings.AE_INPUT_DIM:
+            print(f"  ⚠ Saved model expects {checkpoint_dim} features, current schema has "
+                  f"{settings.AE_INPUT_DIM}. Discarding stale checkpoint, will retrain.")
+            return False
+
+        try:
+            self.model.load_state_dict(checkpoint["model_state"])
+        except RuntimeError as e:
+            print(f"  ⚠ Could not load model checkpoint ({e}). Will retrain.")
+            return False
+
         self.scaler.mean_ = checkpoint["scaler_mean"]
         self.scaler.scale_ = checkpoint["scaler_scale"]
         self.scaler.n_features_in_ = len(checkpoint["scaler_mean"])

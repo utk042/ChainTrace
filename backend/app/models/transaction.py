@@ -13,10 +13,14 @@ class TransactionRecord(BaseModel):
 
     txid: str = Field(..., description="Transaction ID (hex hash)")
     timestamp: datetime = Field(..., description="UTC timestamp of observation")
-    src_ip: str = Field(..., description="Source IP address (observer)")
-    dst_ip: str = Field(..., description="Destination IP address")
-    src_port: int = Field(..., ge=0, le=65535, description="Source port")
-    dst_port: int = Field(..., ge=0, le=65535, description="Destination port")
+    # Network-layer fields are optional: real on-chain data (e.g. pulled from a
+    # block explorer) has no IP/port association — that's peer-to-peer
+    # telemetry nobody publishes in bulk. Only synthetic/lab data or a feed
+    # merged with real node-level captures will have these populated.
+    src_ip: Optional[str] = Field(default=None, description="Source IP address (observer), if known")
+    dst_ip: Optional[str] = Field(default=None, description="Destination IP address, if known")
+    src_port: Optional[int] = Field(default=None, ge=0, le=65535, description="Source port, if known")
+    dst_port: Optional[int] = Field(default=None, ge=0, le=65535, description="Destination port, if known")
     input_addresses: list[str] = Field(default_factory=list, description="Input wallet addresses")
     output_addresses: list[str] = Field(default_factory=list, description="Output wallet addresses")
     input_amounts: list[float] = Field(default_factory=list, description="Input amounts (BTC)")
@@ -45,16 +49,30 @@ class TransactionRecord(BaseModel):
     def validate_addresses(cls, v: list[str]) -> list[str]:
         return [addr.strip() for addr in v if addr.strip()]
 
+    @field_validator("src_ip", "dst_ip", mode="before")
+    @classmethod
+    def blank_ip_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("src_port", "dst_port", mode="before")
+    @classmethod
+    def blank_port_to_none(cls, v):
+        if v is None or v == "" or (isinstance(v, str) and not v.strip()):
+            return None
+        return v
+
 
 class TransactionResponse(BaseModel):
     """Transaction record as returned by the API."""
 
     txid: str
     timestamp: datetime
-    src_ip: str
-    dst_ip: str
-    src_port: int
-    dst_port: int
+    src_ip: Optional[str] = None
+    dst_ip: Optional[str] = None
+    src_port: Optional[int] = None
+    dst_port: Optional[int] = None
     input_addresses: list[str]
     output_addresses: list[str]
     input_amounts: list[float]

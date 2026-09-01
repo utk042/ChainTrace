@@ -286,7 +286,7 @@ The entity graph $G = (V, E)$ consists of three node partitions and four directe
        [Input Address 3] ───┘
 ```
 **Forensic Theorem**: In standard Bitcoin transactions, all private keys corresponding to all input UTXOs must be signed simultaneously to create a valid transaction. Therefore, unless an explicit CoinJoin script structure is detected, all input addresses ($W_1, W_2, W_3$) are controlled by the **same entity**.
-- In [builder.py](file:///Users/sanjitkumar/Hackthons/SIH/Prototype/backend/app/graph/builder.py), every pair of inputs $(W_i, W_j)$ for $|Inputs| > 1$ generates a bidirectional `co_input` edge with weight incrementation.
+- In [builder.py](../backend/app/graph/builder.py), every pair of inputs $(W_i, W_j)$ for $|Inputs| > 1$ generates a bidirectional `co_input` edge with weight incrementation.
 
 ### 6.3 Louvain Community Detection Algorithm
 To collapse hundreds of thousands of pseudonymous addresses into discrete criminal syndicates, we apply the Louvain algorithm on the wallet-to-wallet projected subgraph.
@@ -342,7 +342,7 @@ Where:
 ```
 
 ### 7.1 The 13 Behavioral Features
-In [features.py](file:///Users/sanjitkumar/Hackthons/SIH/Prototype/backend/app/ml/features.py), every address is transformed into a standardized 13-dimensional vector:
+In [features.py](../backend/app/ml/features.py), every address is transformed into a standardized 13-dimensional vector:
 
 ```python
 FEATURE_NAMES = [
@@ -410,7 +410,7 @@ Where:
 - $\phi_i(v)$ represents the exact positive or negative contribution of feature $i$ toward pushing the reconstruction error over threshold $\tau$.
 
 ### 8.3 Automated Investigative Lead Generation
-In [explainer.py](file:///Users/sanjitkumar/Hackthons/SIH/Prototype/backend/app/ml/explainer.py), the platform takes the top positive SHAP attributions and generates natural language intelligence briefs:
+In [explainer.py](../backend/app/ml/explainer.py), the platform takes the top positive SHAP attributions and generates natural language intelligence briefs:
 
 ```python
 # Sample Generated Brief:
@@ -459,7 +459,7 @@ In the analyst UI, this is displayed as color-coded dynamic divergence bars:
 - **React 19 + Vite 8**: Ultra-fast hot module replacement, zero-latency build times.
 - **Sigma.js v3 + Graphology**: WebGL-accelerated canvas rendering capable of fluidly displaying graphs with tens of thousands of nodes at 60 FPS without DOM overhead.
 - **Apache ECharts**: GPU-accelerated canvas charts for time-series activity histograms and risk tier distributions.
-- **Pure Modern CSS System ([index.css](file:///Users/sanjitkumar/Hackthons/SIH/Prototype/frontend/src/index.css))**: Dark forensic palette inspired by intelligence command centers (`#0A0C10` Void Black, `#141820` Card Black, `#FF4D5A` Critical Red, `#4D9FFF` Electric Blue, JetBrains Mono font).
+- **Pure Modern CSS System ([index.css](../frontend/src/index.css))**: Dark forensic palette inspired by intelligence command centers (`#0A0C10` Void Black, `#141820` Card Black, `#FF4D5A` Critical Red, `#4D9FFF` Electric Blue, JetBrains Mono font).
 
 ### 10.2 Page Walkthrough
 

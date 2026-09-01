@@ -74,6 +74,8 @@ def _update_ip_metadata(records: list[TransactionRecord], con: duckdb.DuckDBPyCo
             (r.src_ip, r.geo_country_src, r.asn_src),
             (r.dst_ip, r.geo_country_dst, r.asn_dst),
         ]:
+            if not ip:
+                continue
             if ip not in ip_data:
                 ip_data[ip] = {
                     "ip_address": ip,

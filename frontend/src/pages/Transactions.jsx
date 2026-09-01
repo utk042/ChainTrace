@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getTransactions, getTransactionDetail } from '../services/api';
+import Icon from '../components/Icon';
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState([]);
@@ -40,7 +41,7 @@ export default function Transactions() {
 
       <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-xl)' }}>
         <div className="search-bar" style={{ width: 400 }}>
-          <span style={{ opacity: 0.4 }}>🔍</span>
+          <Icon name="search" size={14} style={{ opacity: 0.5 }} />
           <input
             type="text" placeholder="Search TXID, Address, Block..."
             value={search} onChange={e => setSearch(e.target.value)}
@@ -90,9 +91,9 @@ export default function Transactions() {
               </div>
 
               <div className="pagination">
-                <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
+                <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}><Icon name="chevronLeft" size={13} /> Prev</button>
                 <span className="page-info">Page {page} of {Math.max(1, Math.ceil(total / 20))}</span>
-                <button disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(p => p + 1)}>Next →</button>
+                <button disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(p => p + 1)}>Next <Icon name="chevronRight" size={13} /></button>
               </div>
             </>
           )}
@@ -102,7 +103,9 @@ export default function Transactions() {
           <div className="card slide-in" style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-md)' }}>
               <h3 style={{ fontSize: 'var(--text-md)' }}>Transaction Metadata</h3>
-              <span style={{ cursor: 'pointer', color: 'var(--text-tertiary)' }} onClick={() => { setDetail(null); setSelected(null); }}>×</span>
+              <span style={{ cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex' }} onClick={() => { setDetail(null); setSelected(null); }}>
+                <Icon name="close" size={16} />
+              </span>
             </div>
 
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', wordBreak: 'break-all',
@@ -156,8 +159,8 @@ export default function Transactions() {
               <div style={{ marginBottom: 'var(--space-lg)' }}>
                 <div className="card-title" style={{ marginBottom: 'var(--space-sm)' }}>Behavioral Flags</div>
                 {detail.behavioral_flags.map((flag, i) => (
-                  <div key={i} style={{ fontSize: 'var(--text-sm)', color: 'var(--accent-critical)', padding: '4px 0' }}>
-                    ⚑ {flag}
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)', color: 'var(--accent-critical)', padding: '4px 0' }}>
+                    <Icon name="flag" size={13} /> {flag}
                   </div>
                 ))}
               </div>

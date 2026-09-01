@@ -55,7 +55,31 @@ def _init_schema(con: duckdb.DuckDBPyConnection) -> None:
             age_days          DOUBLE,
             cluster_id        INTEGER,
             anomaly_score     DOUBLE,
-            risk_tier         VARCHAR
+            risk_tier         VARCHAR,
+            peel_chain_depth  INTEGER DEFAULT 0,
+            peel_chain_role   VARCHAR,
+            mixer_interaction_count INTEGER DEFAULT 0,
+            darknet_proximity_hops  INTEGER,
+            darknet_proximity_score DOUBLE DEFAULT 0.0
+        );
+    """)
+
+    # Migration-safe: existing on-disk DBs from before these columns existed.
+    for col, decl in [
+        ("peel_chain_depth", "INTEGER DEFAULT 0"),
+        ("peel_chain_role", "VARCHAR"),
+        ("mixer_interaction_count", "INTEGER DEFAULT 0"),
+        ("darknet_proximity_hops", "INTEGER"),
+        ("darknet_proximity_score", "DOUBLE DEFAULT 0.0"),
+    ]:
+        con.execute(f"ALTER TABLE wallet_features ADD COLUMN IF NOT EXISTS {col} {decl};")
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS seed_wallets (
+            address    VARCHAR PRIMARY KEY,
+            label      VARCHAR,
+            source     VARCHAR,
+            added_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
 

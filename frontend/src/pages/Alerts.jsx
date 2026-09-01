@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getAlerts, exportAlerts } from '../services/api';
+import Icon from '../components/Icon';
 
 export default function Alerts() {
   const [alerts, setAlerts] = useState([]);
@@ -40,7 +41,7 @@ export default function Alerts() {
       <div className="page-header">
         <h1 className="page-title">Active Alerts ({total.toLocaleString()})</h1>
         <div className="page-actions">
-          <button className="btn btn-outline" onClick={handleExport}>↓ Export CSV</button>
+          <button className="btn btn-outline" onClick={handleExport}><Icon name="download" size={13} /> Export CSV</button>
         </div>
       </div>
 
@@ -53,6 +54,7 @@ export default function Alerts() {
               ENTITY SEARCH
             </label>
             <div className="search-bar" style={{ width: 220 }}>
+              <Icon name="search" size={14} style={{ opacity: 0.5 }} />
               <input
                 type="text" placeholder="TXID, Address, Cluster..."
                 value={filters.search}
@@ -73,8 +75,8 @@ export default function Alerts() {
                   onClick={() => setFilters(f => ({ ...f, risk_tier: t }))}
                 >
                   {t ? (
-                    <><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2,
-                      background: t === 'Critical' ? '#FF4D5A' : t === 'High' ? '#FF6B7A' : '#FFB84D',
+                    <><span style={{ display: 'inline-block', width: 8, height: 8,
+                      background: t === 'Critical' ? 'var(--accent-critical)' : t === 'High' ? 'var(--accent-high)' : 'var(--accent-elevated)',
                       marginRight: 4 }} />{t}</>
                   ) : 'All'}
                 </span>
@@ -124,7 +126,14 @@ export default function Alerts() {
                 {alerts.map((alert) => (
                   <tr key={alert.alert_id}>
                     <td>
-                      {alert.risk_tier === 'Critical' ? '⚠' : alert.risk_tier === 'High' ? '⬥' : '◇'}
+                      <Icon
+                        name="alertTriangle"
+                        size={15}
+                        style={{
+                          color: alert.risk_tier === 'Critical' ? 'var(--accent-critical)'
+                            : alert.risk_tier === 'High' ? 'var(--accent-high)' : 'var(--accent-elevated)',
+                        }}
+                      />
                     </td>
                     <td>
                       <span className={`badge ${alert.risk_tier?.toLowerCase()}`}>
@@ -140,7 +149,7 @@ export default function Alerts() {
                       {alert.model}
                     </td>
                     <td>
-                      <span style={{ color: alert.confidence >= 90 ? '#FF4D5A' : alert.confidence >= 70 ? '#FF6B7A' : '#FFB84D' }}>
+                      <span style={{ color: alert.confidence >= 90 ? 'var(--accent-critical)' : alert.confidence >= 70 ? 'var(--accent-high)' : 'var(--accent-elevated)' }}>
                         {alert.confidence?.toFixed(1)}%
                       </span>
                     </td>
@@ -157,9 +166,9 @@ export default function Alerts() {
           </div>
 
           <div className="pagination">
-            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
+            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}><Icon name="chevronLeft" size={13} /> Prev</button>
             <span className="page-info">Page {page} of {Math.max(1, Math.ceil(total / 20))}</span>
-            <button disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(p => p + 1)}>Next →</button>
+            <button disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(p => p + 1)}>Next <Icon name="chevronRight" size={13} /></button>
           </div>
         </>
       )}

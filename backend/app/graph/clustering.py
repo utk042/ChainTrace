@@ -107,6 +107,58 @@ def cluster_wallets(G: nx.Graph) -> dict[int, list[str]]:
     return clusters
 
 
+def refine_clusters_with_embeddings(
+    G: nx.Graph,
+    clusters: dict[int, list[str]],
+    embedder,
+    similarity_threshold: float = 0.75,
+) -> dict[int, list[str]]:
+    """
+    Louvain is topology-only: a wallet with too little direct graph
+    structure (e.g. one observed transaction, no co-input edges) ends up
+    alone in its own singleton cluster even when it behaves/connects just
+    like an existing entity cluster. This is where the Node2Vec graph
+    embeddings this pipeline trains earlier actually get used for entity
+    clustering, per Section 4(ii): merge a singleton wallet into the
+    non-singleton cluster its *learned embedding* is nearest to, when that
+    similarity clears `similarity_threshold`. Topology-confident clusters
+    (size > 1) are left untouched — this only rescues the cases Louvain
+    alone couldn't resolve.
+    """
+    embeddings = getattr(embedder, "embeddings", None)
+    if not clusters or not embeddings:
+        return clusters
+
+    non_singletons = {cid: addrs for cid, addrs in clusters.items() if len(addrs) > 1}
+    if not non_singletons:
+        return clusters
+
+    wallet_pool = {addr for addrs in non_singletons.values() for addr in addrs}
+    merged = {cid: list(addrs) for cid, addrs in clusters.items()}
+
+    for cid, addrs in clusters.items():
+        if len(addrs) != 1:
+            continue
+        wallet = addrs[0]
+        if wallet not in embeddings:
+            continue
+
+        neighbors = embedder.nearest(wallet, k=1, candidates=wallet_pool)
+        if not neighbors:
+            continue
+        best_match, similarity = neighbors[0]
+        if similarity < similarity_threshold:
+            continue
+
+        target_cid = next(c for c, a in non_singletons.items() if best_match in a)
+        merged[target_cid].append(wallet)
+        merged[cid] = []
+        if wallet in G:
+            G.nodes[wallet]["cluster_id"] = target_cid
+
+    return {cid: addrs for cid, addrs in merged.items() if addrs}
+
+
 def get_cluster_summary(G: nx.Graph, clusters: dict[int, list[str]]) -> list[dict]:
     """Generate summary stats per cluster."""
     summaries = []

@@ -8,6 +8,32 @@ from typing import Optional
 
 router = APIRouter(prefix="/api/wallets", tags=["Wallets"])
 
+_FEATURE_COLUMNS = """
+    address, tx_count, total_received, total_sent,
+    fan_in_degree, fan_out_degree, avg_tx_amount, amount_variance,
+    velocity_1h, velocity_24h, round_amount_ratio,
+    unique_ips, unique_countries, first_seen, last_seen, age_days,
+    cluster_id, anomaly_score, risk_tier,
+    peel_chain_depth, peel_chain_role, mixer_interaction_count,
+    darknet_proximity_hops, darknet_proximity_score
+"""
+
+
+def _row_to_wallet(r) -> dict:
+    return {
+        "address": r[0], "tx_count": r[1], "total_received": r[2],
+        "total_sent": r[3], "fan_in_degree": r[4], "fan_out_degree": r[5],
+        "avg_tx_amount": r[6], "amount_variance": r[7],
+        "velocity_1h": r[8], "velocity_24h": r[9],
+        "round_amount_ratio": r[10], "unique_ips": r[11],
+        "unique_countries": r[12], "first_seen": str(r[13]) if r[13] else None,
+        "last_seen": str(r[14]) if r[14] else None, "age_days": r[15],
+        "cluster_id": r[16], "anomaly_score": r[17], "risk_tier": r[18],
+        "peel_chain_depth": r[19], "peel_chain_role": r[20],
+        "mixer_interaction_count": r[21],
+        "darknet_proximity_hops": r[22], "darknet_proximity_score": r[23],
+    }
+
 
 @router.get("")
 def list_wallets(
@@ -36,7 +62,8 @@ def list_wallets(
 
         where = " AND ".join(conditions)
         valid_sorts = ["anomaly_score", "tx_count", "total_received", "total_sent",
-                       "fan_in_degree", "fan_out_degree", "velocity_1h", "age_days"]
+                       "fan_in_degree", "fan_out_degree", "velocity_1h", "age_days",
+                       "peel_chain_depth", "mixer_interaction_count", "darknet_proximity_score"]
         if sort_by not in valid_sorts:
             sort_by = "anomaly_score"
         order = "DESC" if sort_order.lower() == "desc" else "ASC"
@@ -45,43 +72,25 @@ def list_wallets(
 
         offset = (page - 1) * page_size
         rows = con.execute(f"""
-            SELECT address, tx_count, total_received, total_sent,
-                   fan_in_degree, fan_out_degree, avg_tx_amount, amount_variance,
-                   velocity_1h, velocity_24h, round_amount_ratio,
-                   unique_ips, unique_countries, first_seen, last_seen, age_days,
-                   cluster_id, anomaly_score, risk_tier
+            SELECT {_FEATURE_COLUMNS}
             FROM wallet_features
             WHERE {where}
             ORDER BY {sort_by} {order}
             LIMIT ? OFFSET ?
         """, params + [page_size, offset]).fetchall()
 
-        wallets = []
-        for r in rows:
-            wallets.append({
-                "address": r[0], "tx_count": r[1], "total_received": r[2],
-                "total_sent": r[3], "fan_in_degree": r[4], "fan_out_degree": r[5],
-                "avg_tx_amount": r[6], "amount_variance": r[7],
-                "velocity_1h": r[8], "velocity_24h": r[9],
-                "round_amount_ratio": r[10], "unique_ips": r[11],
-                "unique_countries": r[12], "first_seen": str(r[13]) if r[13] else None,
-                "last_seen": str(r[14]) if r[14] else None, "age_days": r[15],
-                "cluster_id": r[16], "anomaly_score": r[17], "risk_tier": r[18],
-            })
-
-        return {"wallets": wallets, "total": total, "page": page, "page_size": page_size}
+        return {
+            "wallets": [_row_to_wallet(r) for r in rows],
+            "total": total, "page": page, "page_size": page_size,
+        }
 
 
 @router.get("/{address}")
 def get_wallet_detail(address: str):
-    """Get detailed wallet information with connected IPs and transactions."""
+    """Get detailed wallet information with connected IPs, transactions, and similar wallets."""
     with get_db_readonly() as con:
-        row = con.execute("""
-            SELECT address, tx_count, total_received, total_sent,
-                   fan_in_degree, fan_out_degree, avg_tx_amount, amount_variance,
-                   velocity_1h, velocity_24h, round_amount_ratio,
-                   unique_ips, unique_countries, first_seen, last_seen, age_days,
-                   cluster_id, anomaly_score, risk_tier
+        row = con.execute(f"""
+            SELECT {_FEATURE_COLUMNS}
             FROM wallet_features WHERE address = ?
         """, [address]).fetchone()
 
@@ -110,15 +119,17 @@ def get_wallet_detail(address: str):
                 "fee": tx[4],
             })
 
-        # Get connected IPs
+        # Get connected IPs (only where network telemetry is actually present)
         ips = con.execute("""
             SELECT DISTINCT src_ip as ip, geo_country_src as country, asn_src as asn
             FROM transactions
-            WHERE list_contains(input_addresses, ?) OR list_contains(output_addresses, ?)
+            WHERE src_ip IS NOT NULL
+              AND (list_contains(input_addresses, ?) OR list_contains(output_addresses, ?))
             UNION
             SELECT DISTINCT dst_ip as ip, geo_country_dst as country, asn_dst as asn
             FROM transactions
-            WHERE list_contains(input_addresses, ?) OR list_contains(output_addresses, ?)
+            WHERE dst_ip IS NOT NULL
+              AND (list_contains(input_addresses, ?) OR list_contains(output_addresses, ?))
             LIMIT 50
         """, [address, address, address, address]).fetchall()
 
@@ -126,23 +137,51 @@ def get_wallet_detail(address: str):
 
         # Get associated alerts
         alerts = con.execute("""
-            SELECT alert_id, risk_tier, confidence, description
+            SELECT alert_id, risk_tier, confidence, description, model
             FROM alerts WHERE entity_id = ?
         """, [address]).fetchall()
 
-        return {
-            "address": row[0], "tx_count": row[1], "total_received": row[2],
-            "total_sent": row[3], "balance": round(row[2] - row[3], 8),
-            "fan_in_degree": row[4], "fan_out_degree": row[5],
-            "avg_tx_amount": row[6], "amount_variance": row[7],
-            "velocity_1h": row[8], "velocity_24h": row[9],
-            "round_amount_ratio": row[10], "unique_ips": row[11],
-            "unique_countries": row[12],
-            "first_seen": str(row[13]) if row[13] else None,
-            "last_seen": str(row[14]) if row[14] else None,
-            "age_days": row[15], "cluster_id": row[16],
-            "anomaly_score": row[17], "risk_tier": row[18],
-            "connected_ips": connected_ips,
-            "recent_transactions": recent_txs,
-            "alerts": [{"alert_id": a[0], "risk_tier": a[1], "confidence": a[2], "description": a[3]} for a in alerts],
-        }
+        is_seed = con.execute(
+            "SELECT 1 FROM seed_wallets WHERE address = ?", [address],
+        ).fetchone() is not None
+
+    # Similar wallets by Node2Vec embedding cosine similarity (see
+    # app/ml/embeddings.py GraphEmbedder.nearest) — a use of graph
+    # embeddings a person can actually see working, distinct from
+    # direct graph adjacency or shared clusters.
+    similar_wallets = []
+    try:
+        from app.ml.trainer import get_embedder, get_wallet_features
+        embedder = get_embedder()
+        wallet_pool = get_wallet_features()
+        if embedder and wallet_pool:
+            candidates = set(wallet_pool.keys()) - {address}
+            for other_addr, similarity in embedder.nearest(address, k=5, candidates=candidates):
+                similar_wallets.append({"address": other_addr, "similarity": round(similarity, 4)})
+    except Exception:
+        pass
+
+    return {
+        "address": row[0], "tx_count": row[1], "total_received": row[2],
+        "total_sent": row[3], "balance": round(row[2] - row[3], 8),
+        "fan_in_degree": row[4], "fan_out_degree": row[5],
+        "avg_tx_amount": row[6], "amount_variance": row[7],
+        "velocity_1h": row[8], "velocity_24h": row[9],
+        "round_amount_ratio": row[10], "unique_ips": row[11],
+        "unique_countries": row[12],
+        "first_seen": str(row[13]) if row[13] else None,
+        "last_seen": str(row[14]) if row[14] else None,
+        "age_days": row[15], "cluster_id": row[16],
+        "anomaly_score": row[17], "risk_tier": row[18],
+        "peel_chain_depth": row[19], "peel_chain_role": row[20],
+        "mixer_interaction_count": row[21],
+        "darknet_proximity_hops": row[22], "darknet_proximity_score": row[23],
+        "is_seed_wallet": is_seed,
+        "connected_ips": connected_ips,
+        "recent_transactions": recent_txs,
+        "similar_wallets": similar_wallets,
+        "alerts": [
+            {"alert_id": a[0], "risk_tier": a[1], "confidence": a[2], "description": a[3], "model": a[4]}
+            for a in alerts
+        ],
+    }

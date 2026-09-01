@@ -1,8 +1,13 @@
 import { useState, useEffect } from 'react';
-import { getSettings, updateSettings, resetSettings, purgeCache } from '../services/api';
+import {
+  getSettings, updateSettings, resetSettings, purgeCache,
+  getSeedWallets, addSeedWallet, removeSeedWallet,
+} from '../services/api';
+import Icon from '../components/Icon';
 
 const settingsSections = [
   { id: 'thresholds', label: 'Forensic Thresholds' },
+  { id: 'watchlist', label: 'Seed Watchlist' },
   { id: 'system', label: 'System' },
 ];
 
@@ -11,10 +16,36 @@ export default function Settings() {
   const [settings, setSettings_] = useState({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
+  const [seedWallets, setSeedWallets] = useState([]);
+  const [newSeedAddress, setNewSeedAddress] = useState('');
+  const [newSeedLabel, setNewSeedLabel] = useState('');
 
   useEffect(() => {
     getSettings().then(res => setSettings_(res.data)).catch(() => {});
+    fetchSeedWallets();
   }, []);
+
+  const fetchSeedWallets = () => {
+    getSeedWallets().then(res => setSeedWallets(res.data || [])).catch(() => {});
+  };
+
+  const handleAddSeed = async () => {
+    const address = newSeedAddress.trim();
+    if (!address) return;
+    try {
+      await addSeedWallet(address, newSeedLabel.trim());
+      setNewSeedAddress('');
+      setNewSeedLabel('');
+      fetchSeedWallets();
+    } catch (e) {}
+  };
+
+  const handleRemoveSeed = async (address) => {
+    try {
+      await removeSeedWallet(address);
+      fetchSeedWallets();
+    } catch (e) {}
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -114,9 +145,9 @@ export default function Settings() {
                   <p>Maximum hop distance to consider a wallet "exposed" to known DNM entities.</p>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-                  <button className="btn btn-outline" style={{ padding: '4px 10px', minWidth: 0 }}
+                  <button className="btn btn-outline" style={{ padding: '4px 8px', minWidth: 0 }}
                     onClick={() => updateField('darknet_proximity_hops', Math.max(1, Number(settings.darknet_proximity_hops || 3) - 1))}>
-                    −
+                    <Icon name="minus" size={12} />
                   </button>
                   <span style={{
                     fontFamily: 'var(--font-mono)', fontSize: 'var(--text-md)',
@@ -125,9 +156,9 @@ export default function Settings() {
                   }}>
                     {settings.darknet_proximity_hops || 3} Hops
                   </span>
-                  <button className="btn btn-outline" style={{ padding: '4px 10px', minWidth: 0 }}
+                  <button className="btn btn-outline" style={{ padding: '4px 8px', minWidth: 0 }}
                     onClick={() => updateField('darknet_proximity_hops', Math.min(10, Number(settings.darknet_proximity_hops || 3) + 1))}>
-                    +
+                    <Icon name="plus" size={12} />
                   </button>
                 </div>
               </div>
@@ -187,6 +218,74 @@ export default function Settings() {
             </div>
           )}
 
+          {activeSection === 'watchlist' && (
+            <div className="settings-section">
+              <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 4 }}>Seed / Watchlist Wallets</h2>
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-xl)' }}>
+                Known-illicit addresses risk is propagated from (Risk Scoring — Section 4). ChainTrace never
+                infers or fabricates this list; an investigator maintains it, e.g. from a sanctions list, a prior
+                case, or an exchange freeze notice. Every wallet within the "Darknet Market Proximity" hop count of
+                one of these gets a proximity-decayed risk boost.
+              </p>
+
+              <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-lg)', flexWrap: 'wrap' }}>
+                <input
+                  type="text" placeholder="Wallet address..."
+                  value={newSeedAddress} onChange={e => setNewSeedAddress(e.target.value)}
+                  style={{ flex: '1 1 260px', background: 'var(--bg-input)', border: '1px solid var(--border-primary)',
+                    color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)',
+                    padding: '8px 12px', borderRadius: 'var(--radius-md)' }}
+                />
+                <input
+                  type="text" placeholder="Label (optional)..."
+                  value={newSeedLabel} onChange={e => setNewSeedLabel(e.target.value)}
+                  style={{ flex: '1 1 180px', background: 'var(--bg-input)', border: '1px solid var(--border-primary)',
+                    color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)',
+                    padding: '8px 12px', borderRadius: 'var(--radius-md)' }}
+                />
+                <button className="btn btn-primary" onClick={handleAddSeed}>
+                  <Icon name="plus" size={13} /> Add
+                </button>
+              </div>
+
+              {seedWallets.length === 0 ? (
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
+                  No seed wallets yet. Add one above, or generate the synthetic demo dataset (Ingest page), which
+                  auto-registers its darknet-adjacent wallets here.
+                </p>
+              ) : (
+                <div className="table-responsive">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Address</th><th>Label</th><th>Source</th><th>Added</th><th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {seedWallets.map(sw => (
+                        <tr key={sw.address}>
+                          <td className="mono">{sw.address}</td>
+                          <td style={{ fontFamily: 'var(--font-sans)' }}>{sw.label || '—'}</td>
+                          <td>{sw.source}</td>
+                          <td style={{ fontSize: 'var(--text-xs)' }}>{sw.added_at?.slice(0, 19)}</td>
+                          <td>
+                            <span
+                              style={{ cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex' }}
+                              title="Remove"
+                              onClick={() => handleRemoveSeed(sw.address)}
+                            >
+                              <Icon name="close" size={14} />
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeSection === 'system' && (
             <div>
               <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
@@ -207,7 +306,7 @@ export default function Settings() {
               </div>
 
               <div className="danger-zone">
-                <h3 style={{ marginBottom: 'var(--space-lg)' }}>⚠ System Reset</h3>
+                <h3 style={{ marginBottom: 'var(--space-lg)' }}><Icon name="alertTriangle" size={13} /> System Reset</h3>
                 <div className="settings-row" style={{ borderBottom: 'none' }}>
                   <div className="settings-row-info">
                     <h3 style={{ color: 'var(--text-primary)' }}>Purge Local Cache</h3>
