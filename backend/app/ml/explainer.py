@@ -138,10 +138,18 @@ class AnomalyExplainer:
 
         return results
 
-    def generate_description(self, shap_explanation: list[dict], score: float) -> str:
-        """Generate a human-readable description from SHAP values."""
+    def generate_description(self, shap_explanation: list[dict], score: float, eff: Optional[dict] = None) -> str:
+        """Generate a human-readable description from SHAP values.
+
+        `eff`: effective (Settings-page-aware) thresholds from
+        app.runtime_settings.get_effective_settings() — falls back to the
+        static config defaults when not supplied.
+        """
         if not shap_explanation:
             return "Anomalous activity detected."
+
+        round_amount_threshold = eff["round_amount_threshold"] if eff else settings.ROUND_AMOUNT_THRESHOLD
+        velocity_spike_threshold = eff["velocity_spike_threshold"] if eff else settings.VELOCITY_SPIKE_THRESHOLD
 
         # Top 3 contributing features
         top_features = shap_explanation[:3]
@@ -159,9 +167,9 @@ class AnomalyExplainer:
                 parts.append(f"High fan-in of {int(value)} addresses")
             elif fname == "fan_out_degree" and value > 10:
                 parts.append(f"High fan-out to {int(value)} addresses")
-            elif fname == "velocity_1h" and value > 20:
+            elif fname == "velocity_1h" and value > velocity_spike_threshold:
                 parts.append(f"Velocity spike: {int(value)} tx/hr")
-            elif fname == "round_amount_ratio" and value > 0.3:
+            elif fname == "round_amount_ratio" and value > round_amount_threshold:
                 parts.append(f"Round-amount ratio: {value:.0%}")
             elif fname == "amount_variance" and value > 1.0:
                 parts.append(f"High amount variance: {value:.2f}")
@@ -171,6 +179,12 @@ class AnomalyExplainer:
                 parts.append(f"New wallet (age: {value:.1f} days)")
             elif fname == "tx_count" and value > 50:
                 parts.append(f"High transaction volume: {int(value)} tx")
+            elif fname == "peel_chain_depth" and value >= 1:
+                parts.append(f"Peel-shaped output structure (depth {int(value)})")
+            elif fname == "mixer_interaction_count" and value >= 1:
+                parts.append(f"Touches {int(value)} CoinJoin-like transaction(s)")
+            elif fname == "darknet_proximity_score" and value > 0:
+                parts.append(f"Graph-proximate to a watchlisted wallet (proximity {value:.2f})")
             else:
                 parts.append(f"Unusual {fname.replace('_', ' ')}: {value:.4g}")
 

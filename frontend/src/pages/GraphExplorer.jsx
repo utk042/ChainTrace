@@ -3,6 +3,7 @@ import { SigmaContainer, useLoadGraph, useSigma } from '@react-sigma/core';
 import '@react-sigma/core/lib/style.css';
 import Graph from 'graphology';
 import { getGraphData, getSubgraph, searchGraph } from '../services/api';
+import Icon from '../components/Icon';
 
 function LoadGraphComponent({ graphData }) {
   const loadGraph = useLoadGraph();
@@ -19,7 +20,7 @@ function LoadGraphComponent({ graphData }) {
           y: node.y || Math.random() * 1000,
           size: node.size || 5,
           label: node.label || node.id,
-          color: node.color || '#4D9FFF',
+          color: node.color || '#5fd4d0',
           node_type: node.node_type,
           risk_tier: node.risk_tier,
           anomaly_score: node.anomaly_score,
@@ -31,7 +32,7 @@ function LoadGraphComponent({ graphData }) {
       try {
         if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
           graph.addEdge(edge.source, edge.target, {
-            color: edge.color || '#2A2F3A',
+            color: edge.color || '#262c36',
             size: Math.max(0.5, (edge.weight || 1) * 0.3),
             edge_type: edge.edge_type,
           });
@@ -103,32 +104,22 @@ export default function GraphExplorer() {
   }, []);
 
   const riskLegend = [
-    { color: '#FF4D5A', label: 'Critical' },
-    { color: '#FF6B7A', label: 'High' },
-    { color: '#FFB84D', label: 'Elevated' },
-    { color: '#4D9FFF', label: 'Wallet' },
-    { color: '#8B5CF6', label: 'IP' },
-    { color: '#6B7280', label: 'Transaction' },
+    { color: '#ef4444', label: 'Critical' },
+    { color: '#f0883e', label: 'High' },
+    { color: '#e0b23c', label: 'Elevated' },
+    { color: '#5fd4d0', label: 'Wallet' },
+    { color: '#b28ee0', label: 'IP' },
+    { color: '#6b7280', label: 'Transaction' },
   ];
 
   if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
 
   return (
     <div style={{ height: 'calc(100vh - var(--topbar-height) - var(--statusbar-height))', position: 'relative' }}>
-      {/* Legend */}
-      <div className="graph-legend">
-        {riskLegend.map(l => (
-          <div key={l.label} className="legend-item">
-            <div className="legend-dot" style={{ background: l.color }} />
-            <span>{l.label}</span>
-          </div>
-        ))}
-      </div>
-
       {/* Controls */}
       <div className="graph-controls">
         <div className="search-bar" style={{ width: 260, background: 'var(--bg-secondary)' }}>
-          <span style={{ opacity: 0.4 }}>🔍</span>
+          <Icon name="search" size={14} style={{ opacity: 0.5 }} />
           <input
             type="text" placeholder="Search node..."
             value={searchQuery}
@@ -163,18 +154,31 @@ export default function GraphExplorer() {
         )}
 
         <button className="btn btn-outline" onClick={handleReset} style={{ fontSize: 'var(--text-xs)' }}>
-          ↻ Reset View
+          <Icon name="rotateCcw" size={13} /> Reset View
         </button>
+
+        <div className="graph-legend">
+          {riskLegend.map(l => (
+            <div key={l.label} className="legend-item">
+              <div className="legend-dot" style={{ background: l.color }} />
+              <span>{l.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Sigma.js Canvas */}
       <SigmaContainer
-        style={{ height: '100%', width: '100%', background: 'var(--bg-primary)' }}
+        style={{
+          height: '100%', width: '100%', background: 'var(--bg-primary)',
+          backgroundImage: 'radial-gradient(circle, #171b21 1px, transparent 1px)',
+          backgroundSize: '22px 22px',
+        }}
         settings={{
-          defaultNodeColor: '#4D9FFF',
-          defaultEdgeColor: '#1F2433',
-          labelColor: { color: '#8B919A' },
-          labelFont: 'Inter',
+          defaultNodeColor: '#5fd4d0',
+          defaultEdgeColor: '#262c36',
+          labelColor: { color: '#a9b0bb' },
+          labelFont: 'IBM Plex Sans',
           labelSize: 10,
           renderEdgeLabels: false,
           enableEdgeEvents: false,
@@ -191,9 +195,9 @@ export default function GraphExplorer() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
             <h3 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>Node Details</h3>
             <span
-              style={{ cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 'var(--text-lg)' }}
+              style={{ cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex' }}
               onClick={() => setSelectedNode(null)}
-            >×</span>
+            ><Icon name="close" size={16} /></span>
           </div>
 
           <div style={{ marginBottom: 'var(--space-md)' }}>
@@ -220,7 +224,7 @@ export default function GraphExplorer() {
             <div style={{ marginBottom: 'var(--space-md)' }}>
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>ANOMALY SCORE</span>
               <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, fontFamily: 'var(--font-mono)',
-                color: selectedNode.anomaly_score >= 90 ? '#FF4D5A' : selectedNode.anomaly_score >= 70 ? '#FF6B7A' : '#FFB84D'
+                color: selectedNode.anomaly_score >= 90 ? 'var(--accent-critical)' : selectedNode.anomaly_score >= 70 ? 'var(--accent-high)' : 'var(--accent-elevated)'
               }}>
                 {selectedNode.anomaly_score?.toFixed(1)}%
               </div>

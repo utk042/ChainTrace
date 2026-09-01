@@ -3,7 +3,7 @@
 **SIH 2026 — Problem Statement SIH26146**  
 **Organization**: National Technical Research Organisation (NTRO)  
 
-> **Interactive Presentation**: Open [`docs/presentation.html`](file:///Users/sanjitkumar/Hackthons/SIH/Prototype/docs/presentation.html) in any web browser to view and present the interactive, animated slide deck. Press `ArrowRight` / `Space` to advance, `F` for fullscreen, or `Cmd+P` to export to PDF.
+> **Interactive Presentation**: Open [`docs/presentation.html`](presentation.html) in any web browser to view and present the interactive, animated slide deck. Press `ArrowRight` / `Space` to advance, `F` for fullscreen, or `Cmd+P` to export to PDF.
 
 ---
 

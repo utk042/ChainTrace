@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { uploadFile, runPipeline, getPipelineStatus, generateSampleData } from '../services/api';
+import { uploadFile, runPipeline, getPipelineStatus, generateSampleData, fetchRealData } from '../services/api';
+import Icon from '../components/Icon';
 
 export default function Ingest() {
   const [file, setFile] = useState(null);
@@ -72,6 +73,22 @@ export default function Ingest() {
     }
   };
 
+  const handleFetchReal = async () => {
+    try {
+      setIsProcessing(true);
+      setPipelineStatus({ status: 'running', progress: 5, message: 'Fetching real, verifiable transactions from the live Bitcoin blockchain (Blockstream API)...' });
+      const res = await fetchRealData(500, 10);
+      if (res.data.error) throw new Error(res.data.error);
+      setPipelineStatus({ status: 'running', progress: 25, message: `${res.data.count} real transactions fetched. Launching ML analysis pipeline...` });
+      await runPipeline({ file_path: res.data.csv_path });
+      setPolling(true);
+    } catch (e) {
+      setPipelineStatus({ status: 'error', progress: 0, message: 'Failed: ' + (e.response?.data?.error || e.message) });
+      setPolling(false);
+      setIsProcessing(false);
+    }
+  };
+
   const handleGenerateSample = async () => {
     try {
       setIsProcessing(true);
@@ -90,11 +107,73 @@ export default function Ingest() {
   const progressColor = pipelineStatus?.status === 'error' ? 'var(--accent-critical)'
     : pipelineStatus?.status === 'completed' ? 'var(--accent-green)' : undefined;
 
+  // Derived from the real progress checkpoints the backend reports
+  // (clear=5, parse=10, validate=20, enrich=30, load=40, ML analysis=50→99, done=100).
+  const progress = pipelineStatus?.progress || 0;
+  const errored = pipelineStatus?.status === 'error';
+  const steps = [
+    { name: 'PARSE & VALIDATE', detail: 'schema + records', min: 0, max: 20 },
+    { name: 'ENRICH', detail: 'GeoIP lookup', min: 20, max: 30 },
+    { name: 'LOAD', detail: 'DuckDB insert', min: 30, max: 40 },
+    { name: 'ML ANALYSIS', detail: 'graph · cluster · score · explain', min: 40, max: 100 },
+  ].map((s, i, arr) => {
+    const nextMin = arr[i + 1]?.min ?? 100;
+    let status = 'pending';
+    if (pipelineStatus?.status === 'completed') status = 'done';
+    else if (errored && progress >= s.min) status = progress < nextMin ? 'error' : 'done';
+    else if (progress >= nextMin) status = 'done';
+    else if (progress >= s.min && pipelineStatus?.status === 'running') status = 'active';
+    return { ...s, status, icon: status === 'done' ? 'check' : status === 'error' ? 'close' : status === 'active' ? 'circleDot' : 'circle' };
+  });
+
   return (
     <div className="page-content fade-in">
       <div className="page-header">
         <h1 className="page-title">Data Ingestion</h1>
       </div>
+
+      {pipelineStatus?.run_id && (
+        <div className="run-header">
+          <div className="run-header-meta">
+            <span>RUN ID <b>{pipelineStatus.run_id}</b></span>
+            {file && <span>DATASET <b>{file.name}</b></span>}
+          </div>
+          <span
+            className="topbar-status"
+            style={{
+              color: pipelineStatus.status === 'completed' ? 'var(--accent-green)'
+                : pipelineStatus.status === 'error' ? 'var(--accent-critical)' : 'var(--accent-elevated)',
+            }}
+          >
+            <span
+              className="pulse-dot"
+              style={{
+                background: pipelineStatus.status === 'completed' ? 'var(--accent-green)'
+                  : pipelineStatus.status === 'error' ? 'var(--accent-critical)' : 'var(--accent-elevated)',
+                animation: pipelineStatus.status === 'running' ? undefined : 'none',
+              }}
+            />
+            {pipelineStatus.status?.toUpperCase()}
+          </span>
+        </div>
+      )}
+
+      {(pipelineStatus?.status === 'running' || pipelineStatus?.status === 'completed' || pipelineStatus?.status === 'error') && (
+        <div className="step-tracker">
+          {steps.map(s => (
+            <div className="step-tracker-item" key={s.name}>
+              <div className="step-tracker-col">
+                <div className={`step-circle ${s.status}`}><Icon name={s.icon} size={15} /></div>
+                <span className="step-name" style={{
+                  color: s.status === 'done' ? 'var(--accent-green)' : s.status === 'active' ? 'var(--accent-elevated)'
+                    : s.status === 'error' ? 'var(--accent-critical)' : 'var(--text-tertiary)',
+                }}>{s.name}</span>
+                <span className="step-detail">{s.detail}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Dropzone */}
       <div
@@ -103,12 +182,12 @@ export default function Ingest() {
         onDragOver={e => e.preventDefault()}
         onClick={() => fileInputRef.current?.click()}
       >
-        <div className="dropzone-icon">📁</div>
+        <div className="dropzone-icon"><Icon name="uploadCloud" size={26} /></div>
         <div className="dropzone-text">
-          {file ? file.name : 'Drop a CSV, JSON, or XML file here'}
+          {file ? file.name : 'DRAG .CSV / .JSON / .XML BLOCKCHAIN EXPORT HERE'}
         </div>
         <div className="dropzone-sub">
-          {file ? `${(file.size / 1024).toFixed(1)} KB` : 'or click to browse'}
+          {file ? `${(file.size / 1024).toFixed(1)} KB` : 'or click to browse — processed entirely offline'}
         </div>
         <input
           ref={fileInputRef}
@@ -120,27 +199,40 @@ export default function Ingest() {
       </div>
 
       {/* Actions */}
-      <div className="ingest-actions" style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-xl)', justifyContent: 'center' }}>
+      <div className="ingest-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-md)', marginTop: 'var(--space-xl)', justifyContent: 'center' }}>
         <button
           className="btn btn-primary"
           disabled={!file}
           onClick={handleUpload}
         >
-          ↑ Upload File
+          <Icon name="upload" size={13} /> Upload File
         </button>
         <button
           className="btn btn-primary"
           disabled={!uploadStatus?.path}
           onClick={() => handleRunPipeline(uploadStatus?.path)}
         >
-          ▶ Run Pipeline
+          <Icon name="play" size={13} /> Run Pipeline
+        </button>
+        <button
+          className="btn btn-outline"
+          disabled={isProcessing}
+          onClick={handleFetchReal}
+          title="Pulls real, verifiable transactions from the live Bitcoin blockchain via Blockstream's public API. Requires internet access; network-layer (IP/port) fields are left blank since no public source for that exists."
+        >
+          {isProcessing
+            ? <><span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> Processing Pipeline...</>
+            : <><Icon name="globe" size={13} /> Fetch Real Blockchain Data &amp; Run</>}
         </button>
         <button
           className="btn btn-outline"
           disabled={isProcessing}
           onClick={handleGenerateSample}
+          title="Generates a synthetic demo dataset with fabricated wallets, IPs, and injected anomaly patterns — for testing the pipeline without real data."
         >
-          {isProcessing ? '⏳ Processing Pipeline...' : '✦ Generate Sample & Run'}
+          {isProcessing
+            ? <><span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> Processing Pipeline...</>
+            : <><Icon name="sparkles" size={13} /> Generate Sample &amp; Run</>}
         </button>
       </div>
 

@@ -8,6 +8,7 @@ import torch
 import numpy as np
 import networkx as nx
 from pathlib import Path
+from typing import Optional
 from app.config import settings
 
 # Try importing PyG; fall back gracefully
@@ -142,6 +143,39 @@ class GraphEmbedder:
     def get_embedding(self, node_id: str) -> np.ndarray:
         """Get embedding for a single node."""
         return self.embeddings.get(node_id, np.zeros(self.embedding_dim))
+
+    def nearest(self, node_id: str, k: int = 5, candidates: Optional[set] = None) -> list[tuple[str, float]]:
+        """
+        Nearest neighbors of `node_id` by cosine similarity over the learned
+        Node2Vec embedding space — wallets that behave/connect similarly even
+        without a direct graph edge between them, which topology-only
+        clustering (Louvain) can't surface on its own.
+
+        `candidates`: restrict the search to this set of node ids (e.g. only
+        wallet-type nodes) — the embedding space mixes wallet/tx/ip nodes.
+        """
+        if node_id not in self.embeddings:
+            return []
+
+        query = self.embeddings[node_id]
+        query_norm = np.linalg.norm(query)
+        if query_norm == 0:
+            return []
+
+        pool = candidates if candidates is not None else self.embeddings.keys()
+        scored = []
+        for other_id in pool:
+            if other_id == node_id or other_id not in self.embeddings:
+                continue
+            vec = self.embeddings[other_id]
+            vec_norm = np.linalg.norm(vec)
+            if vec_norm == 0:
+                continue
+            similarity = float(np.dot(query, vec) / (query_norm * vec_norm))
+            scored.append((other_id, similarity))
+
+        scored.sort(key=lambda x: -x[1])
+        return scored[:k]
 
     def save(self, path: Path = None) -> None:
         """Save embeddings to disk."""

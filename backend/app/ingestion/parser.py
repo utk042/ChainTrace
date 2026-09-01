@@ -172,10 +172,16 @@ def _normalize_row(row: dict) -> dict:
                 result[key] = []
 
         elif key in ("src_port", "dst_port"):
-            try:
-                result[key] = int(value)
-            except (ValueError, TypeError):
-                result[key] = 0
+            if value in (None, ""):
+                result[key] = None
+            else:
+                try:
+                    result[key] = int(value)
+                except (ValueError, TypeError):
+                    result[key] = None
+
+        elif key in ("src_ip", "dst_ip"):
+            result[key] = value if value else None
 
         elif key == "fee":
             try:

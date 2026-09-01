@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { getDashboardStats, getTimeline, getRiskDistribution, getTopAlerts } from '../services/api';
 
+const RISK_COLORS = { Critical: '#ef4444', High: '#f0883e', Elevated: '#e0b23c', Low: '#5cb87a', Normal: '#3d4552' };
+const TIER_ORDER = ['Critical', 'High', 'Elevated', 'Low', 'Normal'];
+
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [timeline, setTimeline] = useState([]);
@@ -20,67 +23,48 @@ export default function Dashboard() {
 
   if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
 
-  const riskColors = { Critical: '#FF4D5A', High: '#FF6B7A', Elevated: '#FFB84D', Low: '#4D9FFF', Normal: '#2A2F3A' };
+  const riskTotal = riskDist.reduce((sum, r) => sum + r.count, 0) || 1;
+  const orderedRisk = TIER_ORDER
+    .map(tier => riskDist.find(r => r.tier === tier))
+    .filter(Boolean);
 
   const timelineOption = {
     backgroundColor: 'transparent',
-    grid: { top: 30, right: 20, bottom: 30, left: 50 },
+    grid: { top: 20, right: 12, bottom: 28, left: 44 },
     xAxis: {
       type: 'category',
       data: timeline.map(t => t.timestamp?.split('T')[0] || ''),
-      axisLine: { lineStyle: { color: '#1F2433' } },
-      axisLabel: { color: '#5A6070', fontSize: 10 },
+      axisLine: { lineStyle: { color: '#262c36' } },
+      axisTick: { show: false },
+      axisLabel: { color: '#6b7280', fontSize: 10, fontFamily: 'IBM Plex Mono' },
     },
     yAxis: {
       type: 'value',
       axisLine: { show: false },
-      splitLine: { lineStyle: { color: '#1F2433' } },
-      axisLabel: { color: '#5A6070', fontSize: 10 },
+      splitLine: { lineStyle: { color: '#1a1e25' } },
+      axisLabel: { color: '#6b7280', fontSize: 10, fontFamily: 'IBM Plex Mono' },
     },
     series: [
       {
         name: 'Transactions',
         type: 'bar',
         data: timeline.map(t => t.count),
-        itemStyle: { color: '#2A3F5F', borderRadius: [3, 3, 0, 0] },
-        barWidth: '60%',
+        itemStyle: { color: '#3d4552' },
+        barWidth: '55%',
       },
       {
         name: 'Anomalies',
         type: 'bar',
         data: timeline.map(t => t.anomaly_count),
-        itemStyle: { color: '#FF4D5A', borderRadius: [3, 3, 0, 0] },
-        barWidth: '60%',
+        itemStyle: { color: '#ef4444' },
+        barWidth: '55%',
       },
     ],
     tooltip: {
       trigger: 'axis',
-      backgroundColor: '#141820',
-      borderColor: '#2A2F3A',
-      textStyle: { color: '#E8ECF1', fontSize: 11 },
-    },
-  };
-
-  const riskOption = {
-    backgroundColor: 'transparent',
-    series: [{
-      type: 'pie',
-      radius: ['55%', '80%'],
-      center: ['50%', '50%'],
-      data: riskDist.map(r => ({
-        name: r.tier,
-        value: r.count,
-        itemStyle: { color: riskColors[r.tier] || '#2A2F3A' },
-      })),
-      label: { show: false },
-      emphasis: {
-        label: { show: true, color: '#E8ECF1', fontSize: 12 },
-      },
-    }],
-    tooltip: {
-      backgroundColor: '#141820',
-      borderColor: '#2A2F3A',
-      textStyle: { color: '#E8ECF1', fontSize: 11 },
+      backgroundColor: '#0e1116',
+      borderColor: '#262c36',
+      textStyle: { color: '#eef0f2', fontSize: 11, fontFamily: 'IBM Plex Mono' },
     },
   };
 
@@ -90,7 +74,7 @@ export default function Dashboard() {
         <h1 className="page-title">Dashboard</h1>
       </div>
 
-      {/* Stat Cards */}
+      {/* KPI strip */}
       <div className="stats-grid">
         <div className="stat-card">
           <span className="stat-label">Total Transactions</span>
@@ -110,7 +94,7 @@ export default function Dashboard() {
             {stats?.total_alerts?.toLocaleString() || '0'}
           </span>
           <span className="stat-sub">
-            {stats?.critical_alerts || 0} Critical · {stats?.high_alerts || 0} High · {stats?.elevated_alerts || 0} Elevated
+            {stats?.critical_alerts || 0} CRIT · {stats?.high_alerts || 0} HIGH · {stats?.elevated_alerts || 0} ELEV
           </span>
         </div>
         <div className="stat-card">
@@ -123,24 +107,42 @@ export default function Dashboard() {
       <div className="two-column" style={{ marginBottom: 'var(--space-xl)' }}>
         <div className="card">
           <div className="card-header">
-            <span className="card-title">Activity Timeline</span>
+            <span className="card-title">Transaction Volume — Timeline</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)' }}>anomalies highlighted</span>
           </div>
-          <ReactECharts option={timelineOption} style={{ height: 260 }} />
+          <ReactECharts option={timelineOption} style={{ height: 220 }} notMerge />
         </div>
         <div className="card">
           <div className="card-header">
-            <span className="card-title">Risk Distribution</span>
+            <span className="card-title">Risk Distribution — Active Wallets</span>
           </div>
-          <ReactECharts option={riskOption} style={{ height: 260 }} />
+          <div className="risk-bar" style={{ marginTop: 'var(--space-lg)' }}>
+            {orderedRisk.map(r => (
+              <div
+                key={r.tier}
+                className="risk-bar-seg"
+                style={{ width: `${(r.count / riskTotal) * 100}%`, background: RISK_COLORS[r.tier] }}
+                title={`${r.tier}: ${r.count}`}
+              />
+            ))}
+          </div>
+          <div className="risk-legend">
+            {orderedRisk.map(r => (
+              <div className="risk-legend-item" key={r.tier}>
+                <span className="risk-legend-swatch" style={{ background: RISK_COLORS[r.tier] }} />
+                {r.tier.toUpperCase()} <span style={{ color: 'var(--text-primary)' }}>{((r.count / riskTotal) * 100).toFixed(0)}%</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Top Alerts */}
-      <div className="card">
-        <div className="card-header">
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="card-header" style={{ padding: 'var(--space-md) var(--space-lg)', margin: 0, borderBottom: '1px solid var(--border-primary)' }}>
           <span className="card-title">Prioritized Alerts</span>
-          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
-            {stats?.total_alerts || 0} Pending
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)' }}>
+            {stats?.total_alerts || 0} PENDING
           </span>
         </div>
         <div className="alert-grid">
@@ -162,7 +164,7 @@ export default function Dashboard() {
               <div className="alert-description">{alert.description}</div>
               {alert.shap_values && Array.isArray(alert.shap_values) && (
                 <div className="shap-bars">
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginBottom: 4 }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: 4 }}>
                     SHAP FEATURE CONTRIBUTION
                   </div>
                   {alert.shap_values.slice(0, 3).map((sv, i) => {

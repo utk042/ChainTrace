@@ -46,11 +46,20 @@ export const uploadFile = (file) => {
 export const runPipeline = (params = {}) => api.post('/api/ingest/run', null, { params });
 export const getPipelineStatus = () => api.get('/api/ingest/status');
 export const generateSampleData = (count = 5000) => api.post(`/api/ingest/generate-sample?count=${count}`);
+export const fetchRealData = (maxTransactions = 500, maxBlocks = 10) =>
+  api.post(`/api/ingest/fetch-real?max_transactions=${maxTransactions}&max_blocks=${maxBlocks}`, null, { timeout: 300000 });
 
 // ─── Settings ────────────────────────────────────────────────
 export const getSettings = () => api.get('/api/settings');
 export const updateSettings = (updates) => api.put('/api/settings', updates);
 export const resetSettings = () => api.post('/api/settings/reset');
 export const purgeCache = () => api.post('/api/settings/purge-cache');
+
+// ─── Seed / Watchlist Wallets (risk propagation) ────────────────
+export const getSeedWallets = () => api.get('/api/settings/seed-wallets');
+export const addSeedWallet = (address, label = '') =>
+  api.post(`/api/settings/seed-wallets?address=${encodeURIComponent(address)}&label=${encodeURIComponent(label)}`);
+export const removeSeedWallet = (address) =>
+  api.delete(`/api/settings/seed-wallets/${encodeURIComponent(address)}`);
 
 export default api;
