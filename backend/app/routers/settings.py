@@ -4,18 +4,11 @@ ChainTrace Forensics — Settings Router
 
 from fastapi import APIRouter
 from app.database import get_db, get_db_readonly
-from app.config import settings
+from app.runtime_settings import default_settings_dict
 
 router = APIRouter(prefix="/api/settings", tags=["Settings"])
 
-DEFAULT_SETTINGS = {
-    "mixer_confidence_threshold": str(settings.MIXER_CONFIDENCE_THRESHOLD),
-    "darknet_proximity_hops": str(settings.DARKNET_PROXIMITY_HOPS),
-    "velocity_spike_threshold": str(settings.VELOCITY_SPIKE_THRESHOLD),
-    "round_amount_threshold": str(settings.ROUND_AMOUNT_THRESHOLD),
-    "anomaly_percentile": str(settings.ANOMALY_PERCENTILE),
-    "geo_ip_strict": "false",
-}
+DEFAULT_SETTINGS = {**default_settings_dict(), "geo_ip_strict": "false"}
 
 
 @router.get("")
@@ -56,7 +49,7 @@ def reset_settings():
 def purge_cache():
     """Purge all cached graph nodes and temporary analysis files."""
     import shutil
-    from app.ml.trainer import get_entity_graph
+    from app.config import settings
 
     # Clear model files
     models_dir = settings.MODELS_DIR
@@ -65,3 +58,41 @@ def purge_cache():
         models_dir.mkdir(parents=True, exist_ok=True)
 
     return {"message": "Cache purged successfully"}
+
+
+# ── Seed / Watchlist Wallets ────────────────────────────────────────
+# The known-illicit addresses risk propagation (Section 4: "Risk Scoring")
+# spreads proximity from. An investigator maintains this list themselves —
+# it is never fabricated by ChainTrace.
+
+@router.get("/seed-wallets")
+def list_seed_wallets():
+    with get_db_readonly() as con:
+        rows = con.execute("""
+            SELECT address, label, source, added_at FROM seed_wallets
+            ORDER BY added_at DESC
+        """).fetchall()
+    return [
+        {"address": r[0], "label": r[1], "source": r[2], "added_at": str(r[3])}
+        for r in rows
+    ]
+
+
+@router.post("/seed-wallets")
+def add_seed_wallet(address: str, label: str = "", source: str = "manual"):
+    address = address.strip()
+    if not address:
+        return {"error": "address is required"}
+    with get_db() as con:
+        con.execute("""
+            INSERT OR REPLACE INTO seed_wallets (address, label, source, added_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        """, [address, label or None, source])
+    return {"message": f"Seed wallet {address} added", "address": address}
+
+
+@router.delete("/seed-wallets/{address}")
+def remove_seed_wallet(address: str):
+    with get_db() as con:
+        con.execute("DELETE FROM seed_wallets WHERE address = ?", [address])
+    return {"message": f"Seed wallet {address} removed"}

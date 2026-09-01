@@ -109,7 +109,7 @@ async def generate_sample_data(count: int = 5000):
     if str(settings.BASE_DIR) not in sys.path:
         sys.path.insert(0, str(settings.BASE_DIR))
 
-    from scripts.generate_synthetic import generate_dataset, save_csv, save_json
+    from scripts.generate_synthetic import generate_dataset, save_csv, save_json, DARKNET_WALLETS
 
     records = generate_dataset(total=count)
     output_dir = settings.DATA_DIR / "sample"
@@ -118,10 +118,24 @@ async def generate_sample_data(count: int = 5000):
     save_csv(records, output_dir / "transactions.csv")
     save_json(records, output_dir / "transactions.json")
 
+    # Auto-register the synthetic dataset's darknet-adjacent wallets as seed
+    # wallets so risk propagation has something to propagate from out of the
+    # box on the demo path. This is specific to the synthetic generator —
+    # real-data ingestion (fetch-real) never auto-seeds anything, since
+    # ChainTrace has no legitimate way to know which real wallets are
+    # illicit; an operator maintains that watchlist themselves via
+    # /api/settings/seed-wallets.
+    with get_db() as con:
+        con.executemany("""
+            INSERT OR IGNORE INTO seed_wallets (address, label, source, added_at)
+            VALUES (?, 'Synthetic demo: darknet-adjacent', 'generate-sample', CURRENT_TIMESTAMP)
+        """, [(w,) for w in DARKNET_WALLETS])
+
     return {
         "count": len(records),
         "csv_path": str(output_dir / "transactions.csv"),
         "json_path": str(output_dir / "transactions.json"),
+        "seed_wallets_registered": len(DARKNET_WALLETS),
         "message": f"Generated {len(records)} synthetic transactions",
     }
 

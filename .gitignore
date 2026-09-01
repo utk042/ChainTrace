@@ -46,6 +46,13 @@ backend/data/*.duckdb.wal
 backend/data/uploads/*
 !backend/data/uploads/.gitkeep
 
+# Trained model artifacts (autoencoder, Node2Vec embeddings) regenerate on
+# the first pipeline run (~1-3 min for the default 5K-record demo set) and
+# are keyed to the current feature schema / dataset's node ids — not worth
+# shipping as a multi-MB binary that goes stale the moment either changes.
+backend/data/models/*
+!backend/data/models/.gitkeep
+
 # Node / Frontend
 node_modules/
 npm-debug.log*

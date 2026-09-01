@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
     # ── ML / Autoencoder ───────────────────────────────────────────────
-    AE_INPUT_DIM: int = 13
+    # 13 behavioral features + peel_chain_depth + mixer_interaction_count +
+    # darknet_proximity_score (see app/ml/features.py FEATURE_NAMES).
+    AE_INPUT_DIM: int = 16
     AE_HIDDEN_DIMS: list[int] = [32, 16, 8]
     AE_LEARNING_RATE: float = 1e-3
     AE_EPOCHS: int = 100
