@@ -2,8 +2,8 @@ services:
   - type: web
     name: chaintrace-backend
     runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
     region: oregon
     envVars:
@@ -14,10 +14,3 @@ services:
       - key: PYTHONUNBUFFERED
         value: "1"
     healthCheckPath: /api/health
-
-    # NOTE: If upgrading to Starter plan ($7/mo) with persistent disk,
-    # change plan to 'starter' and uncomment the disk block below:
-    # disk:
-    #   name: chaintrace-data
-    #   mountPath: /app/data
-    #   sizeGB: 5
