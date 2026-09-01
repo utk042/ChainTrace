@@ -110,15 +110,17 @@ def get_wallet_detail(address: str):
                 "fee": tx[4],
             })
 
-        # Get connected IPs
+        # Get connected IPs (only where network telemetry is actually present)
         ips = con.execute("""
             SELECT DISTINCT src_ip as ip, geo_country_src as country, asn_src as asn
             FROM transactions
-            WHERE list_contains(input_addresses, ?) OR list_contains(output_addresses, ?)
+            WHERE src_ip IS NOT NULL
+              AND (list_contains(input_addresses, ?) OR list_contains(output_addresses, ?))
             UNION
             SELECT DISTINCT dst_ip as ip, geo_country_dst as country, asn_dst as asn
             FROM transactions
-            WHERE list_contains(input_addresses, ?) OR list_contains(output_addresses, ?)
+            WHERE dst_ip IS NOT NULL
+              AND (list_contains(input_addresses, ?) OR list_contains(output_addresses, ?))
             LIMIT 50
         """, [address, address, address, address]).fetchall()
 

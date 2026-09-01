@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { uploadFile, runPipeline, getPipelineStatus, generateSampleData } from '../services/api';
+import { uploadFile, runPipeline, getPipelineStatus, generateSampleData, fetchRealData } from '../services/api';
 import Icon from '../components/Icon';
 
 export default function Ingest() {
@@ -68,6 +68,22 @@ export default function Ingest() {
       setPolling(true);
     } catch (e) {
       setPipelineStatus({ status: 'error', progress: 0, message: 'Pipeline launch failed: ' + (e.response?.data?.error || e.message) });
+      setPolling(false);
+      setIsProcessing(false);
+    }
+  };
+
+  const handleFetchReal = async () => {
+    try {
+      setIsProcessing(true);
+      setPipelineStatus({ status: 'running', progress: 5, message: 'Fetching real, verifiable transactions from the live Bitcoin blockchain (Blockstream API)...' });
+      const res = await fetchRealData(500, 10);
+      if (res.data.error) throw new Error(res.data.error);
+      setPipelineStatus({ status: 'running', progress: 25, message: `${res.data.count} real transactions fetched. Launching ML analysis pipeline...` });
+      await runPipeline({ file_path: res.data.csv_path });
+      setPolling(true);
+    } catch (e) {
+      setPipelineStatus({ status: 'error', progress: 0, message: 'Failed: ' + (e.response?.data?.error || e.message) });
       setPolling(false);
       setIsProcessing(false);
     }
@@ -183,7 +199,7 @@ export default function Ingest() {
       </div>
 
       {/* Actions */}
-      <div className="ingest-actions" style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-xl)', justifyContent: 'center' }}>
+      <div className="ingest-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-md)', marginTop: 'var(--space-xl)', justifyContent: 'center' }}>
         <button
           className="btn btn-primary"
           disabled={!file}
@@ -201,7 +217,18 @@ export default function Ingest() {
         <button
           className="btn btn-outline"
           disabled={isProcessing}
+          onClick={handleFetchReal}
+          title="Pulls real, verifiable transactions from the live Bitcoin blockchain via Blockstream's public API. Requires internet access; network-layer (IP/port) fields are left blank since no public source for that exists."
+        >
+          {isProcessing
+            ? <><span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> Processing Pipeline...</>
+            : <><Icon name="globe" size={13} /> Fetch Real Blockchain Data &amp; Run</>}
+        </button>
+        <button
+          className="btn btn-outline"
+          disabled={isProcessing}
           onClick={handleGenerateSample}
+          title="Generates a synthetic demo dataset with fabricated wallets, IPs, and injected anomaly patterns — for testing the pipeline without real data."
         >
           {isProcessing
             ? <><span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> Processing Pipeline...</>

@@ -52,7 +52,13 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173 and navigate to **Ingest → Generate Sample & Run** to trigger the full pipeline.
+Then open http://localhost:5173 and navigate to **Ingest → Generate Sample & Run** to trigger the full pipeline with fabricated demo data, or **Ingest → Fetch Real Blockchain Data & Run** to pull genuine on-chain transactions instead — see below.
+
+### Using real data instead of the synthetic demo set
+
+`Ingest → Generate Sample & Run` fabricates every field from scratch (random txids, wallets, IPs, timestamps, even pre-labeled "darknet" addresses) purely so the ML pipeline has something to chew on in a demo. For anything beyond a demo, use `Ingest → Fetch Real Blockchain Data & Run` instead: it calls [Blockstream's public Esplora API](https://github.com/Blockstream/esplora) (free, no key) and pulls the most recent confirmed blocks, producing records with **real txids, real wallet addresses, and real amounts** — every txid it returns can be independently checked on any block explorer (blockstream.info, mempool.space, ...). This requires the machine running the backend to have outbound internet access to `blockstream.info`; it will fail cleanly with a clear error if that's unavailable (e.g. inside an air-gapped deployment), in which case fetch the data separately on a connected machine and `Upload File` it instead.
+
+One honest limitation: real on-chain data has no network-layer (source/destination IP or port) component — that P2P relay telemetry isn't public anywhere, for anyone, in bulk (publishing "which IP announced which transaction" is exactly the kind of deanonymization data Bitcoin's network layer is designed not to leak). ChainTrace does not fabricate this to paper over the gap; those fields are simply left blank on real-data records, and GeoIP enrichment, IP graph nodes, and IP-based features degrade gracefully to "unknown" rather than showing invented values. A real investigative deployment would populate that layer by merging in the operator's own node-level capture logs, which is outside what a public blockchain dataset can ever provide.
 
 ### Docker Deployment
 

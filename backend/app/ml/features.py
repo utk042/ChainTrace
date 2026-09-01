@@ -65,8 +65,10 @@ def compute_wallet_features(con: duckdb.DuckDBPyConnection = None) -> dict[str, 
                     w["tx_timestamps"].append(ts)
                     w["total_sent"] += amt
                     w["amounts"].append(amt)
-                    w["ips"].add(src_ip)
-                    w["ips"].add(dst_ip)
+                    if src_ip:
+                        w["ips"].add(src_ip)
+                    if dst_ip:
+                        w["ips"].add(dst_ip)
                     w["countries"].add(country_src or "XX")
                     w["countries"].add(country_dst or "XX")
                     w["output_wallets"].update(out_addrs or [])
@@ -81,8 +83,10 @@ def compute_wallet_features(con: duckdb.DuckDBPyConnection = None) -> dict[str, 
                     w["tx_timestamps"].append(ts)
                     w["total_received"] += amt
                     w["amounts"].append(amt)
-                    w["ips"].add(src_ip)
-                    w["ips"].add(dst_ip)
+                    if src_ip:
+                        w["ips"].add(src_ip)
+                    if dst_ip:
+                        w["ips"].add(dst_ip)
                     w["countries"].add(country_src or "XX")
                     w["countries"].add(country_dst or "XX")
                     w["input_wallets"].update(in_addrs or [])

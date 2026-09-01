@@ -87,13 +87,17 @@ class GeoIPEnricher:
         }
 
     def enrich_record(self, record: TransactionRecord) -> TransactionRecord:
-        """Add GeoIP data to a transaction record (if not already present)."""
-        if not record.geo_country_src:
+        """Add GeoIP data to a transaction record (if not already present).
+
+        No-ops for src_ip/dst_ip that are absent — real on-chain records
+        pulled without network telemetry have nothing to enrich.
+        """
+        if record.src_ip and not record.geo_country_src:
             src_info = self.lookup(record.src_ip)
             record.geo_country_src = src_info["country"]
             record.asn_src = src_info["asn"]
 
-        if not record.geo_country_dst:
+        if record.dst_ip and not record.geo_country_dst:
             dst_info = self.lookup(record.dst_ip)
             record.geo_country_dst = dst_info["country"]
             record.asn_dst = dst_info["asn"]
