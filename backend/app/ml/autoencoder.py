@@ -1,254 +1,71 @@
 """
-ChainTrace Forensics — PyTorch Autoencoder
-Unsupervised anomaly detection via reconstruction error.
-Architecture: 13 → 32 → 16 → 8 → 16 → 32 → 13
+ChainTrace Forensics — Anomaly detection backend selection
+
+`AnomalyDetector()` returns whichever reconstruction-error model this
+deployment can actually afford to run:
+
+  • app/ml/torch_backend.py — the PyTorch autoencoder (non-linear, the
+    stronger detector) when torch is installed and light mode is off.
+  • app/ml/light.py — a PCA linear autoencoder with the same interface,
+    when torch is missing or CT_LIGHT_MODE is set.
+
+Both expose train / score / predict / predict_function / save / load, so
+nothing downstream — the trainer, the SHAP explainer, the alert generator —
+needs to know which one it got.
+
+torch is imported here only if it is going to be used. That matters: the
+import alone reserves a few hundred megabytes, and on a small container the
+process is OOM-killed at import time, long before any request arrives.
 """
 
-import torch
-import torch.nn as nn
-import numpy as np
-from pathlib import Path
-from sklearn.preprocessing import StandardScaler
 from app.config import settings
 
-
-class TransactionAutoencoder(nn.Module):
-    """
-    Symmetric autoencoder for wallet feature anomaly detection.
-
-    Input: 13 behavioral features (normalized)
-    Bottleneck: 8-dimensional latent space
-    Output: 13 reconstructed features
-    Anomaly Signal: MSE reconstruction error
-    """
-
-    def __init__(self, input_dim: int = 13, hidden_dims: list[int] = None):
-        super().__init__()
-        hidden_dims = hidden_dims or settings.AE_HIDDEN_DIMS  # [32, 16, 8]
-
-        # Encoder
-        encoder_layers = []
-        prev_dim = input_dim
-        for h_dim in hidden_dims:
-            encoder_layers.extend([
-                nn.Linear(prev_dim, h_dim),
-                nn.LeakyReLU(0.2),
-                nn.BatchNorm1d(h_dim),
-                nn.Dropout(0.1),
-            ])
-            prev_dim = h_dim
-        self.encoder = nn.Sequential(*encoder_layers)
-
-        # Decoder (mirror of encoder)
-        decoder_layers = []
-        reversed_dims = list(reversed(hidden_dims[:-1])) + [input_dim]
-        prev_dim = hidden_dims[-1]
-        for i, h_dim in enumerate(reversed_dims):
-            decoder_layers.append(nn.Linear(prev_dim, h_dim))
-            if i < len(reversed_dims) - 1:
-                decoder_layers.extend([
-                    nn.LeakyReLU(0.2),
-                    nn.BatchNorm1d(h_dim),
-                    nn.Dropout(0.1),
-                ])
-            prev_dim = h_dim
-        self.decoder = nn.Sequential(*decoder_layers)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return decoded
-
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """Get latent representation."""
-        return self.encoder(x)
-
-    def reconstruction_error(self, x: torch.Tensor) -> torch.Tensor:
-        """Compute per-sample MSE reconstruction error."""
-        with torch.no_grad():
-            reconstructed = self.forward(x)
-            error = torch.mean((x - reconstructed) ** 2, dim=1)
-        return error
+_backend_cls = None
+_backend_reason = ""
 
 
-class AnomalyDetector:
-    """
-    Wraps the autoencoder with scaler, training, and scoring logic.
-    """
+def _torch_importable() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("torch") is not None
 
-    def __init__(self):
-        self.model = TransactionAutoencoder(
-            input_dim=settings.AE_INPUT_DIM,
-            hidden_dims=settings.AE_HIDDEN_DIMS,
-        )
-        self.scaler = StandardScaler()
-        self.threshold = 0.0
-        self.is_trained = False
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
 
-    def train(
-        self,
-        features: np.ndarray,
-        epochs: int = None,
-        batch_size: int = None,
-        learning_rate: float = None,
-    ) -> dict:
-        """
-        Train the autoencoder on wallet features.
+def _select_backend():
+    """Resolve (and memoise) the detector class for this process."""
+    global _backend_cls, _backend_reason
+    if _backend_cls is not None:
+        return _backend_cls
 
-        Args:
-            features: (N, 13) numpy array of wallet features
-            epochs: Training epochs (default from settings)
-            batch_size: Batch size (default from settings)
-            learning_rate: Learning rate (default from settings)
+    if settings.LIGHT_MODE:
+        from app.ml.light import PCAAnomalyDetector
+        _backend_cls = PCAAnomalyDetector
+        _backend_reason = "CT_LIGHT_MODE is enabled"
+    elif not _torch_importable():
+        from app.ml.light import PCAAnomalyDetector
+        _backend_cls = PCAAnomalyDetector
+        _backend_reason = "PyTorch is not installed"
+    else:
+        from app.ml.torch_backend import TorchAnomalyDetector
+        _backend_cls = TorchAnomalyDetector
+        _backend_reason = "PyTorch is available"
 
-        Returns: Training history dict
-        """
-        epochs = epochs or settings.AE_EPOCHS
-        batch_size = batch_size or settings.AE_BATCH_SIZE
-        learning_rate = learning_rate or settings.AE_LEARNING_RATE
+    return _backend_cls
 
-        # Normalize features
-        X_scaled = self.scaler.fit_transform(features)
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32).to(self.device)
 
-        # Create DataLoader
-        dataset = torch.utils.data.TensorDataset(X_tensor)
-        loader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True
-        )
+def backend_name() -> str:
+    """Identifier of the active backend, e.g. for /api/health."""
+    return _select_backend().backend_name
 
-        # Optimizer and loss
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        criterion = nn.MSELoss()
 
-        # Training loop
-        self.model.train()
-        history = {"loss": []}
+def backend_reason() -> str:
+    _select_backend()
+    return _backend_reason
 
-        for epoch in range(epochs):
-            epoch_loss = 0.0
-            for (batch,) in loader:
-                optimizer.zero_grad()
-                output = self.model(batch)
-                loss = criterion(output, batch)
-                loss.backward()
-                optimizer.step()
-                epoch_loss += loss.item()
 
-            avg_loss = epoch_loss / len(loader)
-            history["loss"].append(avg_loss)
+def is_light_mode() -> bool:
+    from app.ml.light import PCAAnomalyDetector
+    return _select_backend() is PCAAnomalyDetector
 
-            if (epoch + 1) % 20 == 0:
-                print(f"  Epoch {epoch + 1}/{epochs} — Loss: {avg_loss:.6f}")
 
-        # Compute anomaly threshold (percentile of reconstruction errors)
-        self.model.eval()
-        errors = self.model.reconstruction_error(X_tensor).cpu().numpy()
-        self.threshold = float(np.percentile(errors, settings.ANOMALY_PERCENTILE))
-        self.is_trained = True
-
-        history["threshold"] = self.threshold
-        history["mean_error"] = float(np.mean(errors))
-        history["max_error"] = float(np.max(errors))
-
-        print(f"  ✓ Training complete. Threshold: {self.threshold:.6f}")
-
-        return history
-
-    def score(self, features: np.ndarray) -> np.ndarray:
-        """
-        Compute anomaly scores for wallet features.
-
-        Returns: (N,) array of reconstruction errors (higher = more anomalous)
-        """
-        if not self.is_trained:
-            raise RuntimeError("Model must be trained before scoring")
-
-        X_scaled = self.scaler.transform(features)
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32).to(self.device)
-
-        self.model.eval()
-        errors = self.model.reconstruction_error(X_tensor).cpu().numpy()
-        return errors
-
-    def predict(self, features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Predict anomalies.
-
-        Returns: (anomaly_flags, anomaly_scores)
-            anomaly_flags: (N,) bool array
-            anomaly_scores: (N,) float array (0-100 confidence)
-        """
-        errors = self.score(features)
-
-        # Normalize errors to 0-100 scale
-        max_err = max(self.threshold * 3, np.max(errors))
-        scores = np.clip(errors / max_err * 100, 0, 100)
-
-        flags = errors > self.threshold
-        return flags, scores
-
-    def save(self, path: Path = None) -> None:
-        """Save model, scaler, and threshold to disk."""
-        path = path or settings.MODELS_DIR
-        path.mkdir(parents=True, exist_ok=True)
-
-        torch.save({
-            "model_state": self.model.state_dict(),
-            "scaler_mean": self.scaler.mean_,
-            "scaler_scale": self.scaler.scale_,
-            "threshold": self.threshold,
-        }, path / "autoencoder.pt")
-        print(f"  ✓ Model saved to {path / 'autoencoder.pt'}")
-
-    def load(self, path: Path = None) -> bool:
-        """Load model from disk. Returns True if successful."""
-        path = path or settings.MODELS_DIR
-        model_file = path / "autoencoder.pt"
-
-        if not model_file.exists():
-            return False
-
-        checkpoint = torch.load(model_file, map_location=self.device, weights_only=False)
-
-        # A checkpoint trained under an older feature schema (different
-        # FEATURE_NAMES length) has an incompatible input/output layer shape.
-        # Rather than crash on load_state_dict, discard it and let the caller
-        # retrain — self-healing across a feature-schema change.
-        checkpoint_dim = len(checkpoint.get("scaler_mean", []))
-        if checkpoint_dim != settings.AE_INPUT_DIM:
-            print(f"  ⚠ Saved model expects {checkpoint_dim} features, current schema has "
-                  f"{settings.AE_INPUT_DIM}. Discarding stale checkpoint, will retrain.")
-            return False
-
-        try:
-            self.model.load_state_dict(checkpoint["model_state"])
-        except RuntimeError as e:
-            print(f"  ⚠ Could not load model checkpoint ({e}). Will retrain.")
-            return False
-
-        self.scaler.mean_ = checkpoint["scaler_mean"]
-        self.scaler.scale_ = checkpoint["scaler_scale"]
-        self.scaler.n_features_in_ = len(checkpoint["scaler_mean"])
-        self.threshold = checkpoint["threshold"]
-        self.is_trained = True
-
-        self.model.eval()
-        print(f"  ✓ Model loaded from {model_file}")
-        return True
-
-    def predict_function(self, data: np.ndarray) -> np.ndarray:
-        """
-        Prediction function for SHAP explainer.
-        Returns per-feature reconstruction error (not summed).
-        """
-        X_scaled = self.scaler.transform(data)
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32).to(self.device)
-        self.model.eval()
-        with torch.no_grad():
-            reconstructed = self.model(X_tensor)
-            # Per-feature error
-            error = (X_tensor - reconstructed) ** 2
-        return error.cpu().numpy()
+def AnomalyDetector():
+    """Construct the anomaly detector for this deployment."""
+    return _select_backend()()

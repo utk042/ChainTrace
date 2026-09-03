@@ -1,253 +1,593 @@
-import { useState, useEffect, useCallback } from 'react';
-import { SigmaContainer, useLoadGraph, useSigma } from '@react-sigma/core';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import '@react-sigma/core/lib/style.css';
-import Graph from 'graphology';
-import { getGraphData, getSubgraph, searchGraph } from '../services/api';
+import GraphCanvas from '../components/Graph/GraphCanvas';
+import NodeInspector from '../components/Graph/NodeInspector';
 import Icon from '../components/Icon';
+import {
+  getGraphData, getSubgraph, searchGraph,
+  getNodeDetail, getNeighbors, findPath,
+} from '../services/api';
 
-function LoadGraphComponent({ graphData }) {
-  const loadGraph = useLoadGraph();
+const NODE_TYPES = [
+  { key: 'wallet', label: 'Wallets', color: '#5FD4D0' },
+  { key: 'transaction', label: 'Transactions', color: '#5C6473' },
+  { key: 'ip', label: 'IP addresses', color: '#B28EE0' },
+];
 
-  useEffect(() => {
-    if (!graphData || !graphData.nodes) return;
+const RISK_LEGEND = [
+  { color: '#EF4444', label: 'Critical' },
+  { color: '#F0883E', label: 'High' },
+  { color: '#E0B23C', label: 'Elevated' },
+];
 
-    const graph = new Graph();
+const LAYOUTS = [
+  { key: 'spring', label: 'Force-directed' },
+  { key: 'kamada_kawai', label: 'Kamada-Kawai' },
+  { key: 'circular', label: 'Circular' },
+];
 
-    graphData.nodes.forEach(node => {
-      try {
-        graph.addNode(node.id, {
-          x: node.x || Math.random() * 1000,
-          y: node.y || Math.random() * 1000,
-          size: node.size || 5,
-          label: node.label || node.id,
-          color: node.color || '#5fd4d0',
-          node_type: node.node_type,
-          risk_tier: node.risk_tier,
-          anomaly_score: node.anomaly_score,
-        });
-      } catch (e) { /* duplicate node */ }
-    });
+const DEFAULT_TYPES = { wallet: true, transaction: true, ip: true };
 
-    graphData.edges.forEach(edge => {
-      try {
-        if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
-          graph.addEdge(edge.source, edge.target, {
-            color: edge.color || '#262c36',
-            size: Math.max(0.5, (edge.weight || 1) * 0.3),
-            edge_type: edge.edge_type,
-          });
-        }
-      } catch (e) { /* duplicate edge */ }
-    });
-
-    loadGraph(graph);
-  }, [graphData, loadGraph]);
-
-  return null;
-}
-
-function GraphEvents({ onNodeClick }) {
-  const sigma = useSigma();
-
-  useEffect(() => {
-    const handler = (event) => {
-      const node = event.node;
-      const attrs = sigma.getGraph().getNodeAttributes(node);
-      onNodeClick({ id: node, ...attrs });
-    };
-    sigma.on('clickNode', handler);
-    return () => sigma.off('clickNode', handler);
-  }, [sigma, onNodeClick]);
-
-  return null;
+function shortId(id, head = 10, tail = 8) {
+  if (!id || id.length <= head + tail + 1) return id;
+  return `${id.slice(0, head)}…${id.slice(-tail)}`;
 }
 
 export default function GraphExplorer() {
   const [graphData, setGraphData] = useState(null);
-  const [selectedNode, setSelectedNode] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [emptyReason, setEmptyReason] = useState(null);
 
+  const [selected, setSelected] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [hovered, setHovered] = useState(null);
+  const [expanding, setExpanding] = useState(false);
+
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [searchMatches, setSearchMatches] = useState(new Set());
+
+  const [types, setTypes] = useState(DEFAULT_TYPES);
+  const [minScore, setMinScore] = useState(0);
+  const [layout, setLayout] = useState('spring');
+  const [panel, setPanel] = useState(null);      // 'filters' | 'legend' | 'keys' | null
+
+  const [pathSource, setPathSource] = useState(null);
+  const [pathQuery, setPathQuery] = useState('');
+  const [pathResult, setPathResult] = useState(null);
+  const [pathBusy, setPathBusy] = useState(false);
+
+  const [liveStats, setLiveStats] = useState(null);
+  const [relayouting, setRelayouting] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const control = useRef({});
+  const searchInput = useRef(null);
+  const focusAfterLoad = useRef(null);
+
+  const filters = useMemo(() => ({ types, minScore }), [types, minScore]);
+
+  const pathNodes = useMemo(
+    () => new Set(pathResult?.found ? pathResult.path.map((p) => p.id) : []),
+    [pathResult],
+  );
+  const pathEdges = useMemo(() => new Set(), []);
+
+  const flash = useCallback((message) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  // ── Data loading ────────────────────────────────────────────────
+  const load = useCallback(async (opts = {}) => {
+    setLoading(true);
+    setError(null);
+    setEmptyReason(null);
+    try {
+      const res = await getGraphData({
+        layout: opts.layout || layout,
+        max_nodes: 1500,
+      });
+      const data = res.data || {};
+      setGraphData(data);
+      if (!data.nodes?.length) {
+        setEmptyReason(data.reason || 'The graph is empty.');
+      }
+    } catch (e) {
+      // Distinguishing these two matters: a hosted frontend pointed at no
+      // backend and a backend with nothing ingested look identical on a blank
+      // canvas, and the fix for each is completely different.
+      setError(
+        e.response
+          ? `Backend returned ${e.response.status} for /api/graph/data.`
+          : 'Cannot reach the backend. Check the API URL in Settings.',
+      );
+      setGraphData({ nodes: [], edges: [], stats: {} });
+    } finally {
+      setLoading(false);
+    }
+  }, [layout]);
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Selection ───────────────────────────────────────────────────
+  const selectNode = useCallback(async (nodeId, { center = true } = {}) => {
+    setSelected(nodeId);
+    setDetail({ id: nodeId, node_type: null });
+    setDetailLoading(true);
+    // Centring is the point of selecting: the node the investigator just
+    // clicked (or picked out of search results) should end up in the middle of
+    // the viewport at a readable zoom, not stay wherever it happened to be.
+    if (center) control.current.focusOn?.(nodeId);
+    try {
+      const res = await getNodeDetail(nodeId);
+      if (res.data?.found) setDetail(res.data);
+      else setDetail({ id: nodeId, node_type: 'unknown', found: false });
+    } catch {
+      setDetail({ id: nodeId, node_type: 'unknown', found: false });
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelected(null);
+    setDetail(null);
+  }, []);
+
+  // ── Search ──────────────────────────────────────────────────────
   useEffect(() => {
+    if (query.trim().length < 2) {
+      setResults([]);
+      setSearchMatches(new Set());
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await searchGraph(query.trim(), { limit: 12 });
+        if (cancelled) return;
+        const rows = res.data || [];
+        setResults(rows);
+        setSearchMatches(new Set(rows.map((r) => r.id)));
+      } catch {
+        if (!cancelled) { setResults([]); setSearchMatches(new Set()); }
+      }
+    }, 220);   // debounce: one request per pause, not per keystroke
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query]);
+
+  // ── Actions ─────────────────────────────────────────────────────
+  const handleExpand = useCallback(async (nodeId) => {
+    setExpanding(true);
+    try {
+      const res = await getNeighbors(nodeId, 60);
+      const added = control.current.addFragment?.(res.data, nodeId) || 0;
+      setLiveStats(control.current.getStats?.());
+      flash(
+        added > 0
+          ? `Added ${added} connected ${added === 1 ? 'entity' : 'entities'}${res.data.truncated ? ` (of ${res.data.total_neighbors})` : ''}.`
+          : 'All neighbours are already on the canvas.',
+      );
+    } catch {
+      flash('Could not expand this node.');
+    } finally {
+      setExpanding(false);
+    }
+  }, [flash]);
+
+  const handleIsolate = useCallback(async (nodeId, hops = 2) => {
     setLoading(true);
-    getGraphData({ layout: 'spring', max_nodes: 1500 })
-      .then(res => setGraphData(res.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleSearch = useCallback(async (q) => {
-    setSearchQuery(q);
-    if (q.length < 3) { setSearchResults([]); return; }
     try {
-      const res = await searchGraph(q);
-      setSearchResults(res.data || []);
-    } catch (e) { setSearchResults([]); }
-  }, []);
-
-  const handleNodeFocus = useCallback(async (entityId) => {
-    try {
-      const res = await getSubgraph(entityId, 2);
+      const res = await getSubgraph(nodeId, hops);
+      if (!res.data?.nodes?.length) {
+        flash('No subgraph available for that entity.');
+        return;
+      }
+      focusAfterLoad.current = nodeId;
       setGraphData(res.data);
-      setSearchResults([]);
-      setSearchQuery('');
-    } catch (e) {}
+      setEmptyReason(null);
+    } catch {
+      flash('Could not load that subgraph.');
+    } finally {
+      setLoading(false);
+    }
+  }, [flash]);
+
+  const handleGraphLoaded = useCallback((graph) => {
+    setLiveStats({ nodes: graph.order, edges: graph.size });
+    const target = focusAfterLoad.current;
+    if (target) {
+      focusAfterLoad.current = null;
+      // One frame after load, so Sigma has laid the graph out and the node has
+      // display coordinates for the camera to fly to.
+      requestAnimationFrame(() => selectNode(target));
+    }
+  }, [selectNode]);
+
+  /** Full reset: original graph, no filters, no selection, camera framed. */
+  const handleReset = useCallback(async () => {
+    setTypes(DEFAULT_TYPES);
+    setMinScore(0);
+    setQuery('');
+    setResults([]);
+    setSearchMatches(new Set());
+    setPathResult(null);
+    setPathSource(null);
+    setPathQuery('');
+    clearSelection();
+    setHovered(null);
+    await load();
+    control.current.fit?.();
+  }, [load, clearSelection]);
+
+  const handlePathSearch = useCallback(async () => {
+    if (!pathSource || !pathQuery.trim()) return;
+    setPathBusy(true);
+    try {
+      const res = await findPath(pathSource, pathQuery.trim());
+      setPathResult(res.data);
+      if (!res.data?.found) flash(res.data?.reason || 'No path found.');
+    } catch {
+      flash('Path search failed.');
+    } finally {
+      setPathBusy(false);
+    }
+  }, [pathSource, pathQuery, flash]);
+
+  const startPath = useCallback((nodeId) => {
+    setPathSource(nodeId);
+    setPathResult(null);
+    setPanel('path');
   }, []);
 
-  const handleReset = useCallback(() => {
-    setLoading(true);
-    setSelectedNode(null);
-    getGraphData({ layout: 'spring', max_nodes: 1500 })
-      .then(res => setGraphData(res.data))
-      .finally(() => setLoading(false));
-  }, []);
+  const exportPng = useCallback(() => {
+    const url = control.current.snapshot?.();
+    if (!url) return flash('Nothing to export yet.');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chaintrace-graph-${Date.now()}.png`;
+    a.click();
+    flash('Graph exported as PNG.');
+  }, [flash]);
 
-  const riskLegend = [
-    { color: '#ef4444', label: 'Critical' },
-    { color: '#f0883e', label: 'High' },
-    { color: '#e0b23c', label: 'Elevated' },
-    { color: '#5fd4d0', label: 'Wallet' },
-    { color: '#b28ee0', label: 'IP' },
-    { color: '#6b7280', label: 'Transaction' },
-  ];
+  const exportJson = useCallback(() => {
+    if (!graphData?.nodes?.length) return flash('Nothing to export yet.');
+    const blob = new Blob([JSON.stringify(graphData, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `chaintrace-graph-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    flash('Graph exported as JSON.');
+  }, [graphData, flash]);
 
-  if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
+  // ── Keyboard shortcuts ──────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e) => {
+      const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
+      if (e.key === 'Escape') {
+        if (typing) { e.target.blur(); return; }
+        clearSelection();
+        setPathResult(null);
+        setPanel(null);
+        return;
+      }
+      if (typing) return;
+
+      switch (e.key) {
+        case '/':
+          e.preventDefault();
+          searchInput.current?.focus();
+          break;
+        case 'f': control.current.fit?.(); break;
+        case 'r': handleReset(); break;
+        case 'l': control.current.relayout?.(); break;
+        case 'e': if (selected) handleExpand(selected); break;
+        case 'c': if (selected) control.current.focusOn?.(selected); break;
+        case '+': case '=': control.current.zoomIn?.(); break;
+        case '-': case '_': control.current.zoomOut?.(); break;
+        default: break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected, handleExpand, handleReset, clearSelection]);
+
+  const stats = graphData?.stats || {};
+  const shownNodes = liveStats?.nodes ?? stats.total_nodes ?? 0;
+  const shownEdges = liveStats?.edges ?? stats.total_edges ?? 0;
+  const activeFilters = Object.values(types).filter(Boolean).length < 3 || minScore > 0;
 
   return (
-    <div style={{ height: 'calc(100vh - var(--topbar-height) - var(--statusbar-height))', position: 'relative' }}>
-      {/* Controls */}
-      <div className="graph-controls">
-        <div className="search-bar" style={{ width: 260, background: 'var(--bg-secondary)' }}>
+    <div className="graph-page">
+      {/* ── Toolbar ─────────────────────────────────────────────── */}
+      <div className="graph-toolbar">
+        <div className="graph-search">
           <Icon name="search" size={14} style={{ opacity: 0.5 }} />
           <input
-            type="text" placeholder="Search node..."
-            value={searchQuery}
-            onChange={e => handleSearch(e.target.value)}
+            ref={searchInput}
+            type="text"
+            placeholder="Search address, txid or IP…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
           />
+          {query && (
+            <button className="icon-btn" onClick={() => setQuery('')} title="Clear">
+              <Icon name="close" size={13} />
+            </button>
+          )}
+          <kbd>/</kbd>
+
+          {results.length > 0 && (
+            <div className="graph-search-results">
+              {results.map((r) => (
+                <button key={r.id} onClick={() => { selectNode(r.id); setQuery(''); }}>
+                  <span className={`legend-dot ${r.node_type}`} />
+                  <code>{shortId(r.id, 12, 8)}</code>
+                  <span className="graph-search-meta">
+                    {r.risk_tier && <em className={`badge ${r.risk_tier.toLowerCase()}`}>{r.risk_tier}</em>}
+                    {r.degree != null && `${r.degree} links`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        {searchResults.length > 0 && (
-          <div style={{
-            background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
-            borderRadius: 'var(--radius-md)', maxHeight: 200, overflow: 'auto'
-          }}>
-            {searchResults.map(r => (
-              <div
-                key={r.id}
-                onClick={() => handleNodeFocus(r.id)}
-                style={{
-                  padding: '6px 12px', cursor: 'pointer', fontSize: 'var(--text-xs)',
-                  fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
-                  borderBottom: '1px solid var(--border-primary)',
-                }}
-                onMouseEnter={e => e.target.style.background = 'var(--bg-hover)'}
-                onMouseLeave={e => e.target.style.background = 'transparent'}
-              >
-                <span className={`badge ${r.risk_tier?.toLowerCase() || 'info'}`} style={{ marginRight: 8 }}>
-                  {r.node_type}
-                </span>
-                {r.id.length > 24 ? `${r.id.slice(0, 12)}...${r.id.slice(-8)}` : r.id}
-              </div>
-            ))}
+        <div className="graph-toolbar-actions">
+          <button
+            className={`tool-btn${activeFilters ? ' active' : ''}`}
+            onClick={() => setPanel(panel === 'filters' ? null : 'filters')}
+            title="Filters"
+          >
+            <Icon name="filter" size={14} /> <span>Filters</span>
+            {activeFilters && <i className="tool-dot" />}
+          </button>
+
+          <select
+            className="tool-select"
+            value={layout}
+            onChange={(e) => { setLayout(e.target.value); load({ layout: e.target.value }); }}
+            title="Server layout"
+          >
+            {LAYOUTS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+          </select>
+
+          <button className="tool-btn" onClick={() => control.current.relayout?.()}
+                  disabled={relayouting} title="Re-run force layout on the current view (L)">
+            <Icon name="layers" size={14} /> <span>{relayouting ? 'Laying out…' : 'Re-layout'}</span>
+          </button>
+
+          <div className="tool-divider" />
+
+          <button className="tool-btn" onClick={() => control.current.fit?.()} title="Fit to view (F)">
+            <Icon name="crosshair" size={14} /> <span>Fit</span>
+          </button>
+          <button className="tool-btn" onClick={handleReset} title="Reset everything (R)">
+            <Icon name="rotateCcw" size={14} /> <span>Reset</span>
+          </button>
+
+          <div className="tool-divider" />
+
+          <button className="tool-btn" onClick={exportPng} title="Export PNG">
+            <Icon name="image" size={14} />
+          </button>
+          <button className="tool-btn" onClick={exportJson} title="Export JSON">
+            <Icon name="download" size={14} />
+          </button>
+          <button className={`tool-btn${panel === 'keys' ? ' active' : ''}`}
+                  onClick={() => setPanel(panel === 'keys' ? null : 'keys')} title="Shortcuts">
+            <Icon name="info" size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Canvas ──────────────────────────────────────────────── */}
+      <div className="graph-stage">
+        <GraphCanvas
+          graphData={graphData}
+          controlRef={control}
+          hovered={hovered}
+          selected={selected}
+          filters={filters}
+          pathNodes={pathNodes}
+          pathEdges={pathEdges}
+          searchMatches={searchMatches}
+          onNodeClick={(id) => selectNode(id)}
+          onNodeHover={setHovered}
+          onStageClick={clearSelection}
+          onGraphLoaded={handleGraphLoaded}
+          onLayoutRunning={setRelayouting}
+        />
+
+        {/* Overlay, never a branch that unmounts the canvas. */}
+        {loading && (
+          <div className="graph-overlay">
+            <div className="spinner" />
+            <span>Building entity graph…</span>
           </div>
         )}
 
-        <button className="btn btn-outline" onClick={handleReset} style={{ fontSize: 'var(--text-xs)' }}>
-          <Icon name="rotateCcw" size={13} /> Reset View
-        </button>
-
-        <div className="graph-legend">
-          {riskLegend.map(l => (
-            <div key={l.label} className="legend-item">
-              <div className="legend-dot" style={{ background: l.color }} />
-              <span>{l.label}</span>
+        {!loading && (error || emptyReason) && (
+          <div className="graph-overlay graph-overlay-message">
+            <Icon name={error ? 'alertTriangle' : 'graph'} size={26} />
+            <h3>{error ? 'Backend unreachable' : 'Nothing to display'}</h3>
+            <p>{error || emptyReason}</p>
+            <div className="graph-overlay-actions">
+              <button className="btn btn-outline" onClick={() => load()}>
+                <Icon name="refresh" size={13} /> Retry
+              </button>
+              <Link className="btn btn-outline" to={error ? '/settings' : '/ingest'}>
+                {error ? 'Open Settings' : 'Go to Ingest'}
+              </Link>
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Sigma.js Canvas */}
-      <SigmaContainer
-        style={{
-          height: '100%', width: '100%', background: 'var(--bg-primary)',
-          backgroundImage: 'radial-gradient(circle, #171b21 1px, transparent 1px)',
-          backgroundSize: '22px 22px',
-        }}
-        settings={{
-          defaultNodeColor: '#5fd4d0',
-          defaultEdgeColor: '#262c36',
-          labelColor: { color: '#a9b0bb' },
-          labelFont: 'IBM Plex Sans',
-          labelSize: 10,
-          renderEdgeLabels: false,
-          enableEdgeEvents: false,
-          zIndex: true,
-        }}
-      >
-        <LoadGraphComponent graphData={graphData} />
-        <GraphEvents onNodeClick={setSelectedNode} />
-      </SigmaContainer>
-
-      {/* Selected Node Panel */}
-      {selectedNode && (
-        <div className="graph-sidebar slide-in">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
-            <h3 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>Node Details</h3>
-            <span
-              style={{ cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex' }}
-              onClick={() => setSelectedNode(null)}
-            ><Icon name="close" size={16} /></span>
           </div>
+        )}
 
-          <div style={{ marginBottom: 'var(--space-md)' }}>
-            <span className={`badge ${selectedNode.node_type === 'wallet' ? 'info' : selectedNode.node_type === 'ip' ? 'purple' : ''}`}>
-              {selectedNode.node_type?.toUpperCase()}
-            </span>
-            {selectedNode.risk_tier && (
-              <span className={`badge ${selectedNode.risk_tier.toLowerCase()}`} style={{ marginLeft: 6 }}>
-                {selectedNode.risk_tier}
+        {/* Filters */}
+        {panel === 'filters' && (
+          <div className="graph-panel graph-panel-left">
+            <header>
+              <Icon name="filter" size={13} /> Filters
+              <button className="icon-btn" onClick={() => setPanel(null)}><Icon name="close" size={13} /></button>
+            </header>
+            <div className="graph-panel-body">
+              {NODE_TYPES.map((t) => (
+                <label key={t.key} className="filter-check">
+                  <input
+                    type="checkbox"
+                    checked={types[t.key]}
+                    onChange={() => setTypes((p) => ({ ...p, [t.key]: !p[t.key] }))}
+                  />
+                  <span className="legend-dot" style={{ background: t.color }} />
+                  {t.label}
+                </label>
+              ))}
+              <div className="filter-slider">
+                <span>Minimum anomaly score<b>{minScore}</b></span>
+                <input type="range" min="0" max="100" step="5"
+                       value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} />
+              </div>
+              <button className="btn btn-outline" style={{ width: '100%' }}
+                      onClick={() => { setTypes(DEFAULT_TYPES); setMinScore(0); }}>
+                Clear filters
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Path finder */}
+        {panel === 'path' && (
+          <div className="graph-panel graph-panel-left">
+            <header>
+              <Icon name="route" size={13} /> Trace connection
+              <button className="icon-btn" onClick={() => setPanel(null)}><Icon name="close" size={13} /></button>
+            </header>
+            <div className="graph-panel-body">
+              <div className="path-endpoint">
+                <span>FROM</span>
+                <code>{shortId(pathSource, 12, 8)}</code>
+              </div>
+              <div className="path-endpoint">
+                <span>TO</span>
+                <input
+                  type="text"
+                  placeholder="Paste an address, txid or IP"
+                  value={pathQuery}
+                  onChange={(e) => setPathQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handlePathSearch()}
+                />
+              </div>
+              <button className="btn btn-primary" style={{ width: '100%' }}
+                      onClick={handlePathSearch} disabled={pathBusy || !pathQuery.trim()}>
+                {pathBusy ? 'Searching…' : 'Find shortest path'}
+              </button>
+
+              {pathResult?.found && (
+                <div className="path-result">
+                  <p>{pathResult.length} hop{pathResult.length === 1 ? '' : 's'}</p>
+                  <ol>
+                    {pathResult.path.map((n, i) => (
+                      <li key={n.id}>
+                        <button onClick={() => selectNode(n.id)}>
+                          <span className={`legend-dot ${n.node_type}`} />
+                          <code>{shortId(n.id, 8, 6)}</code>
+                        </button>
+                        {i < pathResult.hops.length && (
+                          <em>{pathResult.hops[i].edge_type?.replace(/_/g, ' ')}</em>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+              {pathResult && !pathResult.found && (
+                <p className="inspector-note">{pathResult.reason}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Shortcuts */}
+        {panel === 'keys' && (
+          <div className="graph-panel graph-panel-left">
+            <header>
+              <Icon name="info" size={13} /> Shortcuts
+              <button className="icon-btn" onClick={() => setPanel(null)}><Icon name="close" size={13} /></button>
+            </header>
+            <div className="graph-panel-body shortcut-list">
+              {[
+                ['/', 'Focus search'],
+                ['F', 'Fit graph to view'],
+                ['R', 'Reset view and filters'],
+                ['L', 'Re-run force layout'],
+                ['E', 'Expand selected node'],
+                ['C', 'Centre selected node'],
+                ['+ / −', 'Zoom in / out'],
+                ['Esc', 'Clear selection'],
+              ].map(([k, d]) => (
+                <div key={k}><kbd>{k}</kbd><span>{d}</span></div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Legend + stats */}
+        <div className="graph-footer">
+          <div className="graph-legend">
+            {NODE_TYPES.map((t) => (
+              <span key={t.key} className="legend-item">
+                <i className="legend-dot" style={{ background: t.color }} />{t.label}
+              </span>
+            ))}
+            <i className="legend-sep" />
+            {RISK_LEGEND.map((r) => (
+              <span key={r.label} className="legend-item">
+                <i className="legend-dot" style={{ background: r.color }} />{r.label}
+              </span>
+            ))}
+          </div>
+          <div className="graph-stats">
+            {shownNodes.toLocaleString()} nodes · {shownEdges.toLocaleString()} edges
+            {stats.cluster_count ? ` · ${stats.cluster_count} clusters` : ''}
+            {stats.truncated && (
+              <span className="graph-stats-warn" title="Only the most connected part of the graph is drawn">
+                {' '}· sample of {stats.graph_total_nodes?.toLocaleString()}
               </span>
             )}
           </div>
-
-          <div style={{
-            fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)',
-            color: 'var(--text-primary)', wordBreak: 'break-all',
-            background: 'var(--bg-tertiary)', padding: 'var(--space-md)',
-            borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)',
-          }}>
-            {selectedNode.id}
-          </div>
-
-          {selectedNode.anomaly_score > 0 && (
-            <div style={{ marginBottom: 'var(--space-md)' }}>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>ANOMALY SCORE</span>
-              <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, fontFamily: 'var(--font-mono)',
-                color: selectedNode.anomaly_score >= 90 ? 'var(--accent-critical)' : selectedNode.anomaly_score >= 70 ? 'var(--accent-high)' : 'var(--accent-elevated)'
-              }}>
-                {selectedNode.anomaly_score?.toFixed(1)}%
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-            <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => handleNodeFocus(selectedNode.id)}>
-              Investigate
-            </button>
-          </div>
         </div>
-      )}
 
-      {/* Stats Badge */}
-      <div style={{
-        position: 'absolute', bottom: 'var(--space-lg)', left: 'var(--space-lg)',
-        background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
-        borderRadius: 'var(--radius-md)', padding: '8px 12px',
-        fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)',
-      }}>
-        {graphData?.stats?.total_nodes || 0} nodes · {graphData?.stats?.total_edges || 0} edges · {graphData?.stats?.cluster_count || 0} clusters
+        {/* Zoom controls */}
+        <div className="graph-zoom">
+          <button onClick={() => control.current.zoomIn?.()} title="Zoom in (+)"><Icon name="plus" size={14} /></button>
+          <button onClick={() => control.current.zoomOut?.()} title="Zoom out (−)"><Icon name="minus" size={14} /></button>
+          <button onClick={() => control.current.fit?.()} title="Fit (F)"><Icon name="crosshair" size={14} /></button>
+        </div>
+
+        {toast && <div className="graph-toast">{toast}</div>}
       </div>
+
+      {/* ── Inspector ───────────────────────────────────────────── */}
+      {detail && (
+        <NodeInspector
+          detail={detail}
+          loading={detailLoading}
+          expanding={expanding}
+          onClose={clearSelection}
+          onFocus={(id) => control.current.focusOn?.(id)}
+          onExpand={handleExpand}
+          onSelectNode={(id) => {
+            if (control.current.hasNode?.(id)) selectNode(id);
+            else handleIsolate(id, 1);
+          }}
+          onPathFrom={startPath}
+        />
+      )}
     </div>
   );
 }

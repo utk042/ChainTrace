@@ -8,12 +8,28 @@ from typing import Optional
 from app.ml.features import FEATURE_NAMES
 from app.config import settings
 
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except ImportError:
-    SHAP_AVAILABLE = False
-    print("⚠ SHAP not available. Using fallback explainability.")
+# SHAP's KernelExplainer is model-agnostic by way of brute force: it
+# re-evaluates the model over thousands of masked feature coalitions per
+# wallet. That is affordable on a workstation and not on a 512 MB container,
+# so light mode uses the per-feature reconstruction error below instead —
+# a coarser attribution over the same quantity, which is what the alert
+# descriptions consume anyway.
+shap = None
+
+
+def _shap_available() -> bool:
+    global shap
+    if settings.LIGHT_MODE:
+        return False
+    if shap is not None:
+        return True
+    try:
+        import shap as _shap
+        shap = _shap
+        return True
+    except Exception as e:
+        print(f"⚠ SHAP not available ({e}). Using reconstruction-error attribution.")
+        return False
 
 
 class AnomalyExplainer:
@@ -34,7 +50,7 @@ class AnomalyExplainer:
         Args:
             background_features: Representative sample of normal features (N, 13)
         """
-        if not SHAP_AVAILABLE or self.detector is None:
+        if not _shap_available() or self.detector is None:
             return
 
         # Sample background data
@@ -61,7 +77,7 @@ class AnomalyExplainer:
 
         Returns: List of {feature: str, value: float, contribution: float} per sample
         """
-        if not SHAP_AVAILABLE or self.explainer is None:
+        if not _shap_available() or self.explainer is None:
             return self._fallback_explain(features)
 
         try:

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import settings
-from app.database import init_database
+from app.database import init_database, get_db_readonly
 from app.routers import dashboard, alerts, graph_explorer, wallets, transactions, ingest, settings as settings_router
 
 
@@ -16,6 +16,9 @@ async def lifespan(app: FastAPI):
     print("\n🔗 ChainTrace Forensics — Starting...")
     init_database()
     print("✓ Database initialized")
+
+    from app.ml.autoencoder import backend_name, backend_reason
+    print(f"  ML backend: {backend_name()} ({backend_reason()})")
 
     # Try loading existing models
     try:
@@ -93,4 +96,30 @@ def root():
 
 @app.get("/api/health")
 def health():
-    return {"status": "healthy", "service": "ChainTrace Forensics"}
+    """
+    Liveness plus enough state for the UI to explain itself.
+
+    The frontend uses `has_data` to tell "the backend is down" apart from
+    "the backend is up but nothing has been ingested yet" — two situations
+    that previously both rendered as an empty screen with no explanation,
+    which is exactly what a fresh cloud deployment looks like on first load.
+    """
+    from app.ml.autoencoder import backend_name, backend_reason, is_light_mode
+
+    tx_count = 0
+    try:
+        with get_db_readonly() as con:
+            tx_count = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    except Exception:
+        pass
+
+    return {
+        "status": "healthy",
+        "service": "ChainTrace Forensics",
+        "version": "1.0.0",
+        "has_data": tx_count > 0,
+        "transaction_count": tx_count,
+        "light_mode": is_light_mode(),
+        "ml_backend": backend_name(),
+        "ml_backend_reason": backend_reason(),
+    }

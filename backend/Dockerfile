@@ -18,8 +18,18 @@ RUN if [ -d /tmp/build/backend ]; then \
     fi && \
     rm -rf /tmp/build
 
-# Install dependencies using CPU-optimized PyTorch wheels
-RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r /app/requirements.txt
+# Which dependency set to install. `full` pulls PyTorch + PyG + SHAP;
+# `light` skips all three (see backend/requirements-light.txt) and is what a
+# 512 MB host needs — the full set cannot even import inside that budget.
+# Pair a light image with CT_LIGHT_MODE=true so the app selects the matching
+# analysis backends.
+ARG DEPS=full
+
+RUN if [ "$DEPS" = "light" ]; then \
+        pip install --no-cache-dir -r /app/requirements-light.txt; \
+    else \
+        pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r /app/requirements.txt; \
+    fi
 
 # Create data directories
 RUN mkdir -p /app/data/sample /app/data/uploads /app/data/models

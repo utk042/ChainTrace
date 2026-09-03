@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getDashboardStats } from '../../services/api';
+import { useBackendStatus } from '../../hooks/useBackendStatus';
+import { isDemoMode } from '../../services/api';
 import Icon from '../Icon';
 
 function useClock() {
@@ -15,8 +17,26 @@ function formatUTC(date) {
   return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 }
 
+/**
+ * The status pill previously read "OFFLINE MODE" unconditionally — a design
+ * statement about the product, not a report of anything. It now says whether
+ * this frontend is actually talking to a backend, which is the one thing a
+ * blank-looking deployment needs it to say.
+ */
+const CONNECTION = {
+  checking: { label: 'CONNECTING', color: 'var(--accent-elevated)' },
+  demo: { label: 'OFFLINE SNAPSHOT', color: 'var(--accent-purple)' },
+  ready: { label: 'CONNECTED · LOCAL', color: 'var(--accent-green)' },
+  empty: { label: 'CONNECTED · NO DATA', color: 'var(--accent-elevated)' },
+  down: { label: 'BACKEND OFFLINE', color: 'var(--accent-critical)' },
+};
+
 export default function TopBar() {
   const [stats, setStats] = useState(null);
+  const { status: liveStatus } = useBackendStatus();
+  // Snapshot mode answers /api/health from bundled data, so the live check
+  // would otherwise report a healthy backend that isn't there.
+  const status = isDemoMode() ? 'demo' : liveStatus;
   const now = useClock();
 
   useEffect(() => {
@@ -52,9 +72,9 @@ export default function TopBar() {
             </span>
           </div>
         </div>
-        <div className="topbar-status" style={{ color: 'var(--accent-elevated)' }}>
-          <span className="pulse-dot" style={{ background: 'var(--accent-elevated)' }} />
-          OFFLINE MODE
+        <div className="topbar-status" style={{ color: CONNECTION[status].color }}>
+          <span className="pulse-dot" style={{ background: CONNECTION[status].color }} />
+          {CONNECTION[status].label}
         </div>
       </div>
 

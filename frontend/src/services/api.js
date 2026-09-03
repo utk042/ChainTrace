@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { demoAdapter, isDemoMode } from './demoAdapter';
 
 export const getApiBaseUrl = () => {
   return localStorage.getItem('CT_API_URL') || import.meta.env.VITE_API_URL || '';
@@ -20,6 +21,9 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   config.baseURL = getApiBaseUrl();
+  // Demo mode is resolved per request rather than at module load, so toggling
+  // it in Settings takes effect on the next call instead of the next reload.
+  config.adapter = isDemoMode() ? demoAdapter : undefined;
   return config;
 });
 
@@ -37,10 +41,21 @@ export const updateAlertStatus = (id, status) => api.put(`/api/alerts/${id}/stat
 
 // ─── Graph ───────────────────────────────────────────────────
 export const getGraphData = (params = {}) => api.get('/api/graph/data', { params });
-export const getSubgraph = (entityId, hops = 2) => api.get(`/api/graph/subgraph/${entityId}?hops=${hops}`);
+export const getSubgraph = (entityId, hops = 2) =>
+  api.get(`/api/graph/subgraph/${encodeURIComponent(entityId)}`, { params: { hops } });
 export const getGraphStats = () => api.get('/api/graph/stats');
 export const getClusters = () => api.get('/api/graph/clusters');
-export const searchGraph = (q) => api.get(`/api/graph/search?q=${q}`);
+export const searchGraph = (q, params = {}) =>
+  api.get('/api/graph/search', { params: { q, ...params } });
+export const getNodeDetail = (entityId) =>
+  api.get(`/api/graph/node/${encodeURIComponent(entityId)}`);
+export const getNeighbors = (entityId, limit = 60) =>
+  api.get(`/api/graph/neighbors/${encodeURIComponent(entityId)}`, { params: { limit } });
+export const findPath = (source, target) =>
+  api.get('/api/graph/path', { params: { source, target } });
+
+// ─── Health ──────────────────────────────────────────────────
+export const getHealth = () => api.get('/api/health', { timeout: 15000 });
 
 // ─── Wallets ─────────────────────────────────────────────────
 export const getWallets = (params = {}) => api.get('/api/wallets', { params });
@@ -76,5 +91,7 @@ export const addSeedWallet = (address, label = '') =>
   api.post(`/api/settings/seed-wallets?address=${encodeURIComponent(address)}&label=${encodeURIComponent(label)}`);
 export const removeSeedWallet = (address) =>
   api.delete(`/api/settings/seed-wallets/${encodeURIComponent(address)}`);
+
+export { isDemoMode, setDemoMode, preloadSnapshot } from './demoAdapter';
 
 export default api;
