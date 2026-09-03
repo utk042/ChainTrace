@@ -1,14 +1,12 @@
-# Low-memory dependency set — everything except PyTorch, PyTorch Geometric
-# and SHAP. Install this instead of requirements.txt on hosts with under
-# ~1.5 GB of RAM (Render's free tier, small VMs, air-gapped analyst laptops)
-# and set CT_LIGHT_MODE=true.
+# Dependency set without PyTorch, PyTorch Geometric and SHAP. Install this
+# instead of requirements.txt on hosts under ~1.5 GB of RAM and set
+# CT_LIGHT_MODE=true.
 #
-# What you give up: the neural autoencoder becomes a PCA linear autoencoder,
-# Node2Vec embeddings become structural embeddings, and SHAP attribution
-# becomes per-feature reconstruction error. Ingestion, the entity graph,
-# Louvain clustering, every structural pattern detector (peel chains,
-# CoinJoin, consolidation hubs), risk propagation and the whole API surface
-# are unaffected — they never depended on torch.
+# Trade-off: the neural autoencoder becomes a PCA linear autoencoder,
+# Node2Vec becomes structural embeddings, and SHAP attribution becomes
+# per-feature reconstruction error. Ingestion, the entity graph, Louvain
+# clustering, the structural detectors, risk propagation and the API surface
+# are unaffected.
 #
 # Installed size: ~120 MB, against ~2.5 GB for the full set.
 

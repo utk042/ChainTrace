@@ -4,7 +4,7 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
-      "comment": "SPA fallback for client-side routes ONLY. The previous catch-all /(.*) also swallowed /api/*, so when VITE_API_URL was unset the frontend's API calls were answered with index.html and HTTP 200 — axios parsed the HTML as a successful response, every page found no `nodes`/`stats` field on it and rendered empty, and nothing anywhere reported an error. That is the whole reason a Vercel deployment came up with no data. Excluding /api makes a missing backend URL fail loudly as a 404 instead of silently as an empty dataset.",
+      "comment": "SPA fallback for client-side routes only. /api must be excluded: a catch-all rewrite answers API calls with index.html and HTTP 200, so a missing VITE_API_URL fails silently as an empty dataset instead of a 404.",
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

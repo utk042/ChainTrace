@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
-      "comment": "SPA fallback for client-side routes only. /api/* must NOT be rewritten to index.html, or a frontend with no VITE_API_URL silently receives HTML for every API call and renders as an empty dataset with no error. See vercel.json at the repo root.",
+      "comment": "SPA fallback for client-side routes only. /api must be excluded, or a build with no VITE_API_URL receives index.html for every API call and renders as an empty dataset with no error.",
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

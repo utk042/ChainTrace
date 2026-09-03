@@ -2,52 +2,44 @@ import { useEffect, useRef, useMemo, useCallback } from 'react';
 import { SigmaContainer, useLoadGraph, useSigma, useRegisterEvents } from '@react-sigma/core';
 import Graph from 'graphology';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
+import { CANVAS, nodeColor, edgeColor } from '../../theme';
 
 /**
- * The Sigma canvas and everything that has to talk to the Sigma instance
- * directly: graph loading, camera control, hover/selection dimming, resize.
+ * The Sigma canvas and everything that talks to the Sigma instance directly:
+ * graph loading, camera control, hover/selection dimming, resize.
  *
- * Deliberately split out from the page so that none of these ever unmount the
- * SigmaContainer. Unmounting it destroys the WebGL context and the camera
- * along with it, which is what made "Reset View" leave the canvas blank or
- * parked at the old zoom — the page swapped the container for a spinner while
- * fetching, then mounted a fresh Sigma whose camera knew nothing about the
- * graph it was now showing. Loading state is an overlay here, never a branch
- * that removes the canvas.
+ * Split out from the page so nothing here ever unmounts the SigmaContainer —
+ * that destroys the WebGL context and the camera with it. Loading state must
+ * stay an overlay, never a branch that removes the canvas.
  */
 
 const SIGMA_SETTINGS = {
-  defaultNodeColor: '#5FD4D0',
-  defaultEdgeColor: '#242932',
-  labelColor: { color: '#C6CCD5' },
+  defaultNodeColor: CANVAS.highlight,
+  defaultEdgeColor: CANVAS.edge,
+  labelColor: { color: CANVAS.label },
   labelFont: "'IBM Plex Mono', ui-monospace, monospace",
   labelSize: 10,
   labelWeight: '500',
   labelDensity: 0.25,
-  // Only label nodes that are big enough on screen to be worth reading.
-  // Without this every address in a 1,500-node graph tries to draw its label
-  // at once and the canvas turns into unreadable text soup.
+  // Label only nodes large enough on screen to read; otherwise a
+  // 1,500-node graph draws every address at once.
   labelRenderedSizeThreshold: 7,
   renderEdgeLabels: false,
   enableEdgeEvents: false,
   zIndex: true,
   minCameraRatio: 0.03,
   maxCameraRatio: 12,
-  // Node radius grows with the square root of zoom rather than linearly, so
-  // zooming in reveals structure instead of inflating every node into a
-  // circle that swallows its neighbours.
+  // sqrt rather than linear, so zooming in reveals structure instead of
+  // inflating every node until it swallows its neighbours.
   zoomToSizeRatioFunction: (ratio) => Math.sqrt(ratio),
   itemSizesReference: 'positions',
   autoRescale: true,
-  // Sigma throws if it is constructed before its container has a measured
-  // width — which happens whenever the canvas mounts ahead of layout: a
-  // Suspense boundary resolving, a route entered while the tab is hidden, a
-  // grid settling after fonts load. The ResizeObserver below gives it the
-  // right size a frame later, so this only needs to not be fatal.
+  // Sigma throws if constructed before its container has a measured width,
+  // which happens when the canvas mounts ahead of layout. The ResizeObserver
+  // below corrects the size a frame later.
   allowInvalidContainer: true,
-  // Sigma's stock hover renderer paints a light chip behind the label, which
-  // on this palette comes out as white text on a white box. Draw the hover
-  // label with the same dark treatment as everything else.
+  // The stock hover renderer paints a light chip behind the label, which on
+  // this palette renders as white-on-white.
   defaultDrawNodeHover: (context, data, settings) => {
     const size = settings.labelSize;
     const font = settings.labelFont;
@@ -59,26 +51,27 @@ const SIGMA_SETTINGS = {
     const x = Math.round(data.x + data.size + 4);
     const y = Math.round(data.y - size / 2 - 3);
 
-    context.fillStyle = 'rgba(18, 21, 26, 0.94)';
-    context.strokeStyle = '#3D4552';
+    context.fillStyle = CANVAS.hoverBg;
+    context.strokeStyle = CANVAS.hoverBorder;
     context.lineWidth = 1;
     context.beginPath();
     context.rect(x, y, width, size + 8);
     context.fill();
     context.stroke();
 
-    context.fillStyle = '#EEF0F2';
+    context.fillStyle = CANVAS.hoverText;
     context.fillText(data.label, x + 5, y + size + 1);
   },
 };
 
-// Above this many neighbours, stop forcing every label on at once.
+// Above this many neighbours, let Sigma's density rules pick the labels
+// instead of forcing all of them on.
 const LABEL_ALL_BELOW = 14;
 
-const DIM_NODE = '#20242c';
-const DIM_EDGE = '#171a20';
-const HIGHLIGHT_EDGE = '#5FD4D0';
-const PATH_EDGE = '#F0883E';
+const DIM_NODE = CANVAS.dimNode;
+const DIM_EDGE = CANVAS.dimEdge;
+const HIGHLIGHT_EDGE = CANVAS.highlight;
+const PATH_EDGE = CANVAS.path;
 
 function GraphLoader({ graphData, onGraphLoaded }) {
   const loadGraph = useLoadGraph();
@@ -97,8 +90,8 @@ function GraphLoader({ graphData, onGraphLoaded }) {
         size: node.size || 4,
         baseSize: node.size || 4,
         label: node.label || node.id,
-        color: node.color || '#5FD4D0',
-        baseColor: node.color || '#5FD4D0',
+        color: nodeColor(node.node_type, node.risk_tier),
+        baseColor: nodeColor(node.node_type, node.risk_tier),
         node_type: node.node_type,
         risk_tier: node.risk_tier,
         anomaly_score: node.anomaly_score,
@@ -111,8 +104,8 @@ function GraphLoader({ graphData, onGraphLoaded }) {
       if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
       if (graph.hasEdge(edge.source, edge.target)) return;
       graph.addEdgeWithKey(edge.id, edge.source, edge.target, {
-        color: edge.color || DIM_EDGE,
-        baseColor: edge.color || DIM_EDGE,
+        color: edgeColor(edge.edge_type),
+        baseColor: edgeColor(edge.edge_type),
         // Edge widths sit under 1px at rest: at this node count the edges are
         // context, and anything thicker reads as a solid mat of colour.
         size: Math.min(1.6, 0.4 + (edge.weight || 1) * 0.15),
@@ -121,9 +114,7 @@ function GraphLoader({ graphData, onGraphLoaded }) {
     });
 
     loadGraph(graph);
-    // The camera keeps whatever position it had from the previous graph, which
-    // for a new dataset is meaningless — reset it so a fresh load always opens
-    // framed on the data.
+    // The camera otherwise keeps its position from the previous graph.
     sigma.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
     onGraphLoaded?.(graph);
   }, [graphData, loadGraph, sigma, onGraphLoaded]);
@@ -139,12 +130,10 @@ function ResizeHandler() {
     const container = sigma.getContainer();
     if (!container || typeof ResizeObserver === 'undefined') return;
 
-    // Sigma only re-reads its dimensions on window resize, so it misses every
-    // layout change that doesn't resize the window: the sidebar collapsing,
-    // the inspector panel opening, a phone rotating, a flex parent settling
-    // after fonts load. The canvas then keeps its stale size and the graph
-    // renders squashed or clipped. Observing the container itself covers all
-    // of them.
+    // Sigma only re-reads its dimensions on window resize, so it misses
+    // layout changes that don't resize the window (the inspector opening, a
+    // flex parent settling) and keeps a stale canvas size. Observing the
+    // container covers those.
     let frame = 0;
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
@@ -165,9 +154,8 @@ function ResizeHandler() {
 }
 
 /**
- * Hover / selection emphasis, filtering and path highlighting, all expressed
- * as reducers so they are pure presentation — no mutation of the underlying
- * graph, and instant to toggle.
+ * Hover/selection emphasis, filtering and path highlighting as reducers:
+ * pure presentation, no mutation of the underlying graph.
  */
 function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatches }) {
   const sigma = useSigma();
@@ -227,16 +215,11 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
           res.forceLabel = true;
         } else if (neighborSet.has(node)) {
           res.zIndex = 2;
-          // Labels are forced only when the neighbourhood is small enough to
-          // read. A 60-edge hub would otherwise stack 60 addresses on top of
-          // each other in a few hundred pixels — worse than no labels at all.
-          // Above the cap, Sigma's own density rules pick a legible subset and
-          // zooming in reveals the rest.
+          // Only force labels on a neighbourhood small enough to read; a
+          // 60-edge hub would stack 60 addresses in a few hundred pixels.
           res.forceLabel = neighborSet.size <= LABEL_ALL_BELOW;
         } else {
-          // Dim rather than hide: the shape of the surrounding graph is still
-          // useful context, it just shouldn't compete with the neighbourhood
-          // being examined.
+          // Dimmed, not hidden: the surrounding shape is still context.
           res.color = DIM_NODE;
           res.label = '';
           res.zIndex = 0;
@@ -307,20 +290,15 @@ function Events({ onNodeClick, onNodeHover, onStageClick }) {
   return null;
 }
 
-/**
- * Exposes imperative camera / layout operations to the page through a ref,
- * so the toolbar can drive the canvas without the page holding the Sigma
- * instance itself.
- */
+/** Exposes camera and layout operations to the page through a ref. */
 function Controller({ controlRef, onLayoutRunning }) {
   const sigma = useSigma();
 
   const focusOn = useCallback((nodeId, ratio = 0.28) => {
     const graph = sigma.getGraph();
     if (!graph.hasNode(nodeId)) return false;
-    // Node coordinates have to be read through the renderer, not the graph:
-    // Sigma rescales the layout into its own display space, so the raw x/y
-    // from the layout would send the camera somewhere off-canvas.
+    // Read through the renderer, not the graph: Sigma rescales the layout
+    // into its own display space, so raw x/y would aim off-canvas.
     const pos = sigma.getNodeDisplayData(nodeId);
     if (!pos) return false;
     sigma.getCamera().animate(
@@ -340,8 +318,7 @@ function Controller({ controlRef, onLayoutRunning }) {
       zoomIn: () => sigma.getCamera().animatedZoom({ duration: 200 }),
       zoomOut: () => sigma.getCamera().animatedUnzoom({ duration: 200 }),
       snapshot: () => {
-        // Sigma renders across stacked canvases (edges, nodes, labels), so a
-        // usable export has to composite them onto one surface in order.
+        // Sigma renders across stacked canvases; composite them in order.
         const canvases = sigma.getCanvases();
         const order = ['edges', 'nodes', 'edgeLabels', 'labels', 'hovers'];
         const first = canvases.nodes;
@@ -361,9 +338,8 @@ function Controller({ controlRef, onLayoutRunning }) {
         const graph = sigma.getGraph();
         if (graph.order === 0) return;
         onLayoutRunning?.(true);
-        // Run ForceAtlas2 synchronously in a bounded number of iterations.
-        // The server's spring layout is a reasonable first frame; this lets an
-        // investigator untangle a specific view without a round-trip.
+        // Bounded synchronous run: untangles the current view without a
+        // round-trip to the server's layout.
         const settings = forceAtlas2.inferSettings(graph);
         forceAtlas2.assign(graph, {
           iterations: Math.max(50, Math.min(300, Math.round(12000 / Math.max(1, graph.order)))),
@@ -380,8 +356,8 @@ function Controller({ controlRef, onLayoutRunning }) {
 
         (fragment.nodes || []).forEach((node, i) => {
           if (graph.hasNode(node.id)) return;
-          // Place new nodes on a ring around the node they came from, so an
-          // expansion reads as growth out of that node rather than a scatter.
+          // Ring placement around the parent, so the expansion reads as
+          // growth out of that node.
           const angle = (i / Math.max(1, fragment.nodes.length)) * Math.PI * 2;
           const radius = 60 + Math.random() * 40;
           graph.addNode(node.id, {
@@ -390,8 +366,8 @@ function Controller({ controlRef, onLayoutRunning }) {
             size: node.size || 4,
             baseSize: node.size || 4,
             label: node.label || node.id,
-            color: node.color || '#5FD4D0',
-            baseColor: node.color || '#5FD4D0',
+            color: nodeColor(node.node_type, node.risk_tier),
+            baseColor: nodeColor(node.node_type, node.risk_tier),
             node_type: node.node_type,
             risk_tier: node.risk_tier,
             anomaly_score: node.anomaly_score,
@@ -405,8 +381,8 @@ function Controller({ controlRef, onLayoutRunning }) {
           if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
           if (graph.hasEdge(edge.source, edge.target)) return;
           graph.addEdge(edge.source, edge.target, {
-            color: DIM_EDGE,
-            baseColor: DIM_EDGE,
+            color: edgeColor(edge.edge_type),
+            baseColor: edgeColor(edge.edge_type),
             size: 0.6,
             edge_type: edge.edge_type,
           });

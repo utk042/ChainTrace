@@ -24,13 +24,11 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
     # ── Deployment profile ─────────────────────────────────────────────
-    # Light mode swaps the PyTorch autoencoder for a PCA linear autoencoder,
-    # skips Node2Vec random-walk training, and skips SHAP's kernel explainer.
-    # Set CT_LIGHT_MODE=true on any host with under ~1.5 GB of RAM: importing
-    # torch costs ~250 MB before any work happens, and Node2Vec training on a
-    # 5k-transaction graph peaks well past a 512 MB container's budget, so the
-    # process gets OOM-killed mid-pipeline and the UI just sees an empty
-    # dataset. See app/ml/light.py for what the substitutes actually do.
+    # Light mode swaps the PyTorch autoencoder for a PCA linear autoencoder
+    # and skips Node2Vec and SHAP. Set CT_LIGHT_MODE=true on hosts under
+    # ~1.5 GB RAM: torch costs ~250 MB at import and Node2Vec training on a
+    # 5k-transaction graph peaks well past a 512 MB budget.
+    # See app/ml/light.py for the substitutes.
     LIGHT_MODE: bool = False
 
     # ── ML / Autoencoder ───────────────────────────────────────────────

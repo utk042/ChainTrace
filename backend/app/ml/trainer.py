@@ -103,8 +103,7 @@ def run_full_pipeline() -> dict:
 
     summary = {
         "started_at": datetime.utcnow().isoformat(),
-        # Which analysis backends actually ran, so the run summary never
-        # implies a neural autoencoder trained on a host that hasn't got one.
+        # Which analysis backends actually ran.
         "ml_backend": backend_name(),
         "light_mode": is_light_mode(),
         "steps": {},

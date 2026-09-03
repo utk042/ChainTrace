@@ -18,11 +18,9 @@ RUN if [ -d /tmp/build/backend ]; then \
     fi && \
     rm -rf /tmp/build
 
-# Which dependency set to install. `full` pulls PyTorch + PyG + SHAP;
-# `light` skips all three (see backend/requirements-light.txt) and is what a
-# 512 MB host needs — the full set cannot even import inside that budget.
-# Pair a light image with CT_LIGHT_MODE=true so the app selects the matching
-# analysis backends.
+# Dependency set to install. `full` pulls PyTorch + PyG + SHAP; `light`
+# skips all three (see backend/requirements-light.txt) and is what a 512 MB
+# host needs. Pair a light image with CT_LIGHT_MODE=true.
 ARG DEPS=full
 
 RUN if [ "$DEPS" = "light" ]; then \

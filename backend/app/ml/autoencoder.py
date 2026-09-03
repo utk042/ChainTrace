@@ -1,21 +1,20 @@
 """
 ChainTrace Forensics — Anomaly detection backend selection
 
-`AnomalyDetector()` returns whichever reconstruction-error model this
-deployment can actually afford to run:
+`AnomalyDetector()` returns the reconstruction-error model this deployment
+can run:
 
-  • app/ml/torch_backend.py — the PyTorch autoencoder (non-linear, the
-    stronger detector) when torch is installed and light mode is off.
-  • app/ml/light.py — a PCA linear autoencoder with the same interface,
-    when torch is missing or CT_LIGHT_MODE is set.
+  • app/ml/torch_backend.py — PyTorch autoencoder, when torch is installed
+    and light mode is off.
+  • app/ml/light.py — PCA linear autoencoder, when torch is missing or
+    CT_LIGHT_MODE is set.
 
-Both expose train / score / predict / predict_function / save / load, so
-nothing downstream — the trainer, the SHAP explainer, the alert generator —
-needs to know which one it got.
+Both expose train / score / predict / predict_function / save / load, so no
+caller needs to know which it got.
 
-torch is imported here only if it is going to be used. That matters: the
-import alone reserves a few hundred megabytes, and on a small container the
-process is OOM-killed at import time, long before any request arrives.
+torch is imported only if it will be used: the import reserves a few hundred
+megabytes, enough to be OOM-killed on a small container before any request
+arrives.
 """
 
 from app.config import settings

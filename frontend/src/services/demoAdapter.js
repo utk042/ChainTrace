@@ -35,8 +35,7 @@ export const setDemoMode = (on) => {
 
 let snapshotPromise = null;
 const loadSnapshot = () => {
-  // Dynamic import keeps the ~1.6 MB snapshot out of every other build's
-  // bundle; it is fetched only once demo mode is actually on.
+  // Dynamic import keeps the ~1.6 MB snapshot out of the main bundle.
   if (!snapshotPromise) snapshotPromise = import('../demo/snapshot.json').then((m) => m.default);
   return snapshotPromise;
 };
@@ -208,8 +207,8 @@ export async function demoAdapter(config) {
   }
 
   if (url.startsWith('/api/graph/subgraph/')) {
-    // The snapshot has no server to re-cut a subgraph, so hand back the graph
-    // it does have and let the caller centre on the requested node.
+    // No server to re-cut a subgraph: return the whole graph and let the
+    // caller centre on the requested node.
     return ok({ ...snap.graph, ready: true, focus: tail('/api/graph/subgraph/') }, config);
   }
 

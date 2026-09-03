@@ -8,12 +8,10 @@ from typing import Optional
 from app.ml.features import FEATURE_NAMES
 from app.config import settings
 
-# SHAP's KernelExplainer is model-agnostic by way of brute force: it
-# re-evaluates the model over thousands of masked feature coalitions per
-# wallet. That is affordable on a workstation and not on a 512 MB container,
-# so light mode uses the per-feature reconstruction error below instead —
-# a coarser attribution over the same quantity, which is what the alert
-# descriptions consume anyway.
+# KernelExplainer re-evaluates the model over thousands of masked feature
+# coalitions per wallet, which a 512 MB container cannot afford. Light mode
+# falls back to per-feature reconstruction error: coarser attribution over
+# the same quantity.
 shap = None
 
 
