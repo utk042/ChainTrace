@@ -88,6 +88,46 @@ def build_entity_graph(con: duckdb.DuckDBPyConnection = None) -> nx.Graph:
             ctx.__exit__(None, None, None)
 
 
+def apply_scores_from_db(G: nx.Graph, con: duckdb.DuckDBPyConnection = None) -> int:
+    """
+    Copy anomaly scores, risk tiers and cluster ids from `wallet_features` onto
+    an already-built graph. Returns the number of nodes updated.
+
+    build_entity_graph() reads the transactions table only, so a graph rebuilt
+    outside a pipeline run — at startup, or on demand in a worker that has
+    none — carries no scores at all. The explorer then renders every node in
+    the default type colour, and a restarted backend silently loses the risk
+    colouring that is the whole point of the link chart.
+    """
+    own_connection = con is None
+    if own_connection:
+        ctx = get_db_readonly()
+        con = ctx.__enter__()
+
+    try:
+        rows = con.execute(
+            "SELECT address, anomaly_score, risk_tier, cluster_id FROM wallet_features"
+        ).fetchall()
+    except Exception as e:
+        print(f"⚠ Could not read wallet_features to score the graph: {e}")
+        return 0
+    finally:
+        if own_connection:
+            ctx.__exit__(None, None, None)
+
+    updated = 0
+    for address, score, tier, cluster_id in rows:
+        if address not in G:
+            continue
+        G.nodes[address]["anomaly_score"] = score or 0.0
+        G.nodes[address]["risk_tier"] = tier or "Normal"
+        if cluster_id is not None:
+            G.nodes[address]["cluster_id"] = cluster_id
+        updated += 1
+
+    return updated
+
+
 def get_subgraph(G: nx.Graph, entity_id: str, hops: int = 2) -> nx.Graph:
     """Extract N-hop ego subgraph around an entity."""
     if entity_id not in G:

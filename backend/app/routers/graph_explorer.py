@@ -9,7 +9,9 @@ from fastapi import APIRouter, Query
 from typing import Optional
 
 from app.database import get_db_readonly
-from app.graph.builder import get_subgraph, get_graph_stats, build_entity_graph
+from app.graph.builder import (
+    get_subgraph, get_graph_stats, build_entity_graph, apply_scores_from_db,
+)
 from app.graph.serializer import graph_to_json, NODE_COLORS, RISK_COLORS, _node_size, _truncate
 from app.ml.trainer import get_entity_graph, get_clusters
 
@@ -52,33 +54,11 @@ def _resolve_graph() -> Optional[nx.Graph]:
         if trainer._clusters is None:
             from app.graph.clustering import cluster_wallets
             trainer._clusters = cluster_wallets(G)
-        _decorate_with_scores(G)
+        apply_scores_from_db(G)
         return G
     except Exception as e:
         print(f"⚠ On-demand graph rebuild failed: {e}")
         return None
-
-
-def _decorate_with_scores(G: nx.Graph) -> None:
-    """
-    Copy anomaly scores / risk tiers / cluster ids from wallet_features onto
-    the rebuilt graph, so a rebuilt graph is coloured the same as one the
-    pipeline just produced.
-    """
-    try:
-        with get_db_readonly() as con:
-            rows = con.execute(
-                "SELECT address, anomaly_score, risk_tier, cluster_id FROM wallet_features"
-            ).fetchall()
-    except Exception:
-        return
-
-    for address, score, tier, cluster_id in rows:
-        if address in G:
-            G.nodes[address]["anomaly_score"] = score or 0.0
-            G.nodes[address]["risk_tier"] = tier or "Normal"
-            if cluster_id is not None:
-                G.nodes[address]["cluster_id"] = cluster_id
 
 
 def _empty_payload(reason: str) -> dict:

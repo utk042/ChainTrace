@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
 import Sidebar from './components/Layout/Sidebar';
 import TopBar from './components/Layout/TopBar';
 import StatusBar from './components/Layout/StatusBar';
@@ -18,6 +18,11 @@ const Transactions = lazy(() => import('./pages/Transactions'));
 const Ingest = lazy(() => import('./pages/Ingest'));
 const Settings = lazy(() => import('./pages/Settings'));
 
+// The standalone single-file build has no server to map paths onto index.html
+// — it is opened from a file:// URL or served as one static page — so it routes
+// through the hash instead. Every other build uses real paths.
+const Router = import.meta.env.VITE_HASH_ROUTER === 'true' ? HashRouter : BrowserRouter;
+
 function RouteFallback() {
   return (
     <div className="loading-spinner">
@@ -28,7 +33,7 @@ function RouteFallback() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <Router>
       <div className="app-layout">
         <Sidebar />
         <div className="main-content">
@@ -48,6 +53,6 @@ export default function App() {
           <StatusBar />
         </div>
       </div>
-    </BrowserRouter>
+    </Router>
   );
 }

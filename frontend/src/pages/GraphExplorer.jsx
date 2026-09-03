@@ -74,7 +74,16 @@ export default function GraphExplorer() {
     () => new Set(pathResult?.found ? pathResult.path.map((p) => p.id) : []),
     [pathResult],
   );
-  const pathEdges = useMemo(() => new Set(), []);
+  // Edge keys are assigned by whoever serialised the graph, so the path's
+  // edges are identified by their endpoints rather than by key.
+  const pathEdges = useMemo(() => {
+    const pairs = new Set();
+    for (const hop of pathResult?.hops || []) {
+      pairs.add(`${hop.source}\u0000${hop.target}`);
+      pairs.add(`${hop.target}\u0000${hop.source}`);
+    }
+    return pairs;
+  }, [pathResult]);
 
   const flash = useCallback((message) => {
     setToast(message);
