@@ -39,6 +39,12 @@ const SIGMA_SETTINGS = {
   zoomToSizeRatioFunction: (ratio) => Math.sqrt(ratio),
   itemSizesReference: 'positions',
   autoRescale: true,
+  // Sigma throws if it is constructed before its container has a measured
+  // width — which happens whenever the canvas mounts ahead of layout: a
+  // Suspense boundary resolving, a route entered while the tab is hidden, a
+  // grid settling after fonts load. The ResizeObserver below gives it the
+  // right size a frame later, so this only needs to not be fatal.
+  allowInvalidContainer: true,
   // Sigma's stock hover renderer paints a light chip behind the label, which
   // on this palette comes out as white text on a white box. Draw the hover
   // label with the same dark treatment as everything else.
@@ -255,7 +261,7 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
       }
 
       if (hasPath) {
-        if (pathEdges.has(edge)) {
+        if (pathEdges.has(`${source}\u0000${target}`)) {
           res.color = PATH_EDGE;
           res.size = 2.5;
           res.zIndex = 2;

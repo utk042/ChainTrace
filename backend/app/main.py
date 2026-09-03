@@ -35,6 +35,12 @@ async def lifespan(app: FastAPI):
             trainer._entity_graph = build_entity_graph()
             from app.graph.clustering import cluster_wallets
             trainer._clusters = cluster_wallets(trainer._entity_graph)
+            # The rebuilt graph knows nothing about the last run's scores until
+            # these are copied back on; without it a restarted backend serves a
+            # graph with every risk colour and anomaly score missing.
+            from app.graph.builder import apply_scores_from_db
+            scored = apply_scores_from_db(trainer._entity_graph)
+            print(f"  Restored scores for {scored} wallet(s)")
 
             # Try loading pre-trained models
             from app.ml.autoencoder import AnomalyDetector

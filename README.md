@@ -94,6 +94,18 @@ graph structure) from data bundled into the build. It is labelled as a
 snapshot throughout, and ingestion and settings writes are refused rather than
 faked.
 
+For a copy you can hand to someone as a single attachment:
+
+```bash
+cd frontend && npm run build:standalone
+# -> dist/chaintrace-standalone.html  (~3.4 MB, one file)
+```
+
+Scripts, styles, fonts and the snapshot are all embedded, routing goes through
+the hash and snapshot mode is on, so the file opens straight from `file://`
+with no server, no install and no network. (The PNG/JSON export buttons need a
+real browser context; everything else works.)
+
 ### Cloud deployment (Vercel + Render)
 
 Two things have to be right or the frontend comes up with no data:
