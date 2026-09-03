@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import {
   getSettings, updateSettings, resetSettings, purgeCache,
   getSeedWallets, addSeedWallet, removeSeedWallet,
-  getApiBaseUrl, setApiBaseUrl,
+  getApiBaseUrl, setApiBaseUrl, isDemoMode, setDemoMode,
 } from '../services/api';
+import { useBackendStatus } from '../hooks/useBackendStatus';
 import Icon from '../components/Icon';
 
 const settingsSections = [
@@ -21,6 +22,13 @@ export default function Settings() {
   const [newSeedAddress, setNewSeedAddress] = useState('');
   const [newSeedLabel, setNewSeedLabel] = useState('');
   const [apiUrl, setApiUrl] = useState(getApiBaseUrl() || '');
+  const { health, status } = useBackendStatus();
+  const demo = isDemoMode();
+
+  const toggleDemo = () => {
+    setDemoMode(!demo);
+    window.location.reload();
+  };
 
   const handleSaveApiUrl = () => {
     setApiBaseUrl(apiUrl.trim());
@@ -302,10 +310,25 @@ export default function Settings() {
                 <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-md)' }}>System Information</h2>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)', fontSize: 'var(--text-sm)' }}>
                   {[
-                    ['Version', '1.0.0'],
+                    ['Version', health?.version || '1.0.0'],
                     ['Database', 'DuckDB (embedded)'],
-                    ['ML Model', 'Autoencoder + Node2Vec'],
-                    ['Explainability', 'SHAP KernelExplainer'],
+                    ['Connection', demo ? 'Offline snapshot'
+                      : status === 'down' ? 'Unreachable'
+                      : status === 'empty' ? 'Connected — no data'
+                      : 'Connected'],
+                    ['Transactions loaded', health?.transaction_count?.toLocaleString() ?? '—'],
+                    // Read from the backend rather than hardcoded: on a
+                    // light-mode host neither the neural autoencoder nor
+                    // Node2Vec nor SHAP is running, and this panel is where an
+                    // operator checks what produced the scores they're reading.
+                    ['Anomaly model', health?.light_mode ? 'PCA linear autoencoder'
+                      : health ? 'PyTorch autoencoder' : '—'],
+                    ['Embeddings', health?.light_mode ? 'Structural (degree/clustering)'
+                      : health ? 'Node2Vec (PyG)' : '—'],
+                    ['Explainability', health?.light_mode ? 'Per-feature reconstruction error'
+                      : health ? 'SHAP KernelExplainer' : '—'],
+                    ['Deployment profile', health?.light_mode ? 'Light (low memory)'
+                      : health ? 'Full' : '—'],
                   ].map(([k, v]) => (
                     <div key={k} style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
                       <div style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-xs)', marginBottom: 2 }}>{k}</div>
@@ -338,6 +361,32 @@ export default function Settings() {
                       Reset to Default
                     </button>
                   )}
+                </div>
+              </div>
+
+              <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
+                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-md)' }}>Offline Snapshot Mode</h2>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-md)', lineHeight: 1.6 }}>
+                  Serves a stored run of the analysis pipeline (4,970 synthetic
+                  transactions) from data bundled into this build, so the whole
+                  interface is usable with no backend — on a hosted preview link,
+                  or on a machine with no network at all. Scores, alerts, clusters
+                  and graph structure are genuine pipeline output; nothing
+                  recomputes, and ingestion and settings changes are refused
+                  rather than faked.
+                </p>
+                <div className="settings-row" style={{ borderBottom: 'none' }}>
+                  <div className="settings-row-info">
+                    <h3 style={{ color: 'var(--text-primary)' }}>
+                      {demo ? 'Snapshot mode is on' : 'Snapshot mode is off'}
+                    </h3>
+                    <p>{demo
+                      ? 'All pages are reading from the bundled snapshot.'
+                      : 'All pages are reading from the configured backend.'}</p>
+                  </div>
+                  <button className={demo ? 'btn btn-secondary' : 'btn btn-outline'} onClick={toggleDemo}>
+                    {demo ? 'Switch to live backend' : 'Use offline snapshot'}
+                  </button>
                 </div>
               </div>
 

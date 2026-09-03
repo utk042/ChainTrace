@@ -62,7 +62,19 @@ def get_dashboard_stats():
             flagged_entities=flagged,
             clusters_detected=clusters,
             last_ingest=last_ingest,
+            # Report the models that actually ran, not a fixed string. On a
+            # light-mode host there is no neural autoencoder and no Node2Vec,
+            # and a status bar claiming otherwise is the kind of detail that
+            # makes an operator distrust everything else on screen.
+            model_name=_model_label(),
         )
+
+
+def _model_label() -> str:
+    from app.ml.autoencoder import is_light_mode
+    if is_light_mode():
+        return "PCA autoencoder + structural embeddings"
+    return "Autoencoder + Node2Vec"
 
 
 @router.get("/timeline")
