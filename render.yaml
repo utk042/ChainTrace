@@ -7,26 +7,21 @@ services:
     plan: free
     region: oregon
 
-    # The free instance type has 512 MB of RAM. The full dependency set can't
-    # work inside that — `import torch` alone reserves ~250 MB, and Node2Vec
-    # training peaks far past the rest — so the container is OOM-killed
-    # mid-pipeline and the frontend sees an empty dataset with no error.
-    # Building with DEPS=light and running with CT_LIGHT_MODE=true swaps in
-    # the NumPy/scikit-learn analysis backends, which fit.
-    #
-    # On a paid instance (2 GB+), drop both of these to get the neural
-    # autoencoder, Node2Vec embeddings and SHAP attribution back.
+    # The free instance has 512 MB of RAM, which the full dependency set
+    # cannot run in: torch reserves ~250 MB at import and Node2Vec training
+    # peaks well past the rest, so the container is OOM-killed mid-pipeline.
+    # DEPS=light + CT_LIGHT_MODE swaps in the NumPy/scikit-learn backends.
+    # Drop both on a 2 GB+ instance to restore the neural autoencoder,
+    # Node2Vec embeddings and SHAP attribution.
     dockerfileArgs:
       DEPS: light
 
     envVars:
       - key: CT_LIGHT_MODE
         value: "true"
-      # Render's free tier has no persistent disk: the filesystem is reset on
-      # every deploy and every wake from sleep, so an ingested dataset does
-      # not survive. Attach a disk mounted at /app/data on a paid plan to keep
-      # data between restarts; otherwise re-run ingestion after each cold
-      # start (the app detects the empty database and says so).
+      # Free instances have no persistent disk: the filesystem resets on every
+      # deploy and every wake from sleep, so ingested data does not survive a
+      # cold start. Attach a disk at /app/data on a paid plan to keep it.
       - key: CT_DUCKDB_PATH
         value: /app/data/chaintrace.duckdb
       - key: CT_CORS_ORIGINS
@@ -35,7 +30,7 @@ services:
         value: "1"
     healthCheckPath: /api/health
 
-    # Uncomment on a paid plan to make ingested data survive restarts:
+    # Uncomment on a paid plan to persist ingested data across restarts:
     # disk:
     #   name: chaintrace-data
     #   mountPath: /app/data

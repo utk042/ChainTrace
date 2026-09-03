@@ -23,11 +23,8 @@ RISK_COLORS = {
     "Normal": None,  # Use type color
 }
 
-# Sigma draws a node at `size` pixels of radius at zoom 1, so these are
-# literal on-screen radii, not arbitrary units. Wallets are the entities an
-# investigator actually reasons about, so they get the widest range;
-# transactions and IPs stay small so they read as connective tissue rather
-# than competing for attention.
+# On-screen radii in pixels at zoom 1 (Sigma treats `size` literally).
+# Wallets get the widest range; transactions and IPs stay small.
 SIZE_RANGE = {
     "wallet": (3.0, 11.0),
     "ip": (2.5, 7.0),
@@ -35,25 +32,22 @@ SIZE_RANGE = {
     "unknown": (2.5, 6.0),
 }
 
-# Degree at which a node reaches the top of its size range. Beyond this the
-# size saturates instead of running away — one 400-edge hub shouldn't flatten
-# every other node to a dot.
+# Degree at which a node reaches the top of its size range; beyond this the
+# size saturates so a single high-degree hub cannot flatten everything else.
 DEGREE_SATURATION = 40.0
 
 
 def _node_size(node_type: str, degree: int, anomaly_score: float) -> float:
     """
-    Node radius in screen pixels, driven by what the size should actually
-    *mean*: connectivity first, with a modest bump for scored risk.
+    Node radius in screen pixels: connectivity first, with a bump for risk.
 
-    sqrt keeps the growth perceptually even (area scales with degree rather
-    than radius), and the saturation cap stops hubs from dominating.
+    sqrt makes area rather than radius scale with degree, which keeps the
+    growth perceptually even.
     """
     lo, hi = SIZE_RANGE.get(node_type, SIZE_RANGE["unknown"])
     ratio = min(1.0, math.sqrt(max(0, degree) / DEGREE_SATURATION))
     size = lo + (hi - lo) * ratio
-    # Risk-scored wallets get up to 25% larger so a critical node standing
-    # alone on the edge of the graph is still findable.
+    # Up to 25% larger, so an isolated high-risk node stays findable.
     if anomaly_score:
         size *= 1.0 + 0.25 * min(1.0, anomaly_score / 100.0)
     return round(size, 2)
@@ -116,8 +110,8 @@ def graph_to_json(
         color = RISK_COLORS.get(risk_tier) or NODE_COLORS.get(node_type, "#5C6473")
         pos = positions.get(node_id, (random.uniform(-1, 1), random.uniform(-1, 1)))
 
-        # Everything the inspector panel needs to render without a second
-        # round-trip; the detail endpoint adds counterparties and alerts.
+        # Enough for the client to render a node without a second request;
+        # the detail endpoint adds counterparties and alerts.
         metadata = {k: v for k, v in data.items()
                     if k not in ("node_type", "cluster_id", "risk_tier", "anomaly_score")}
         metadata["degree"] = degree
@@ -142,7 +136,7 @@ def graph_to_json(
         edge_type = data.get("edge_type", "unknown")
         color = "#242932"
         if edge_type == "co_input":
-            color = "#8A5A5F"     # co-ownership inference — the strongest claim
+            color = "#8A5A5F"     # co-ownership inference
         elif edge_type == "wallet_input":
             color = "#3A6E7A"
         elif edge_type == "wallet_output":
@@ -175,8 +169,7 @@ def graph_to_json(
         "ip_count": sum(1 for _, d in G.nodes(data=True) if d.get("node_type") == "ip"),
         "tx_count": sum(1 for _, d in G.nodes(data=True) if d.get("node_type") == "transaction"),
         "cluster_count": len(clusters),
-        # So the UI can say "showing 1,500 of 8,420" instead of silently
-        # presenting a sample as if it were the whole graph.
+        # Lets the client distinguish a sampled view from a complete one.
         "truncated": truncated,
         "graph_total_nodes": full_node_count,
         "graph_total_edges": full_edge_count,

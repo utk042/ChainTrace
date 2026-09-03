@@ -4,9 +4,8 @@ import { useBackendStatus } from '../../hooks/useBackendStatus';
 import { isDemoMode, setDemoMode } from '../../services/api';
 
 /**
- * One line across the top of the app whenever the session isn't a normal
- * connected one, naming the actual problem and the page that fixes it.
- * Silent when a live backend is serving data.
+ * One line across the top of the app when the session isn't a normal
+ * connected one, naming the problem and the page that fixes it.
  */
 export default function ConnectionBanner() {
   const { status, apiUrl, error, recheck } = useBackendStatus();

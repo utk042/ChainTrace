@@ -1,14 +1,12 @@
 """
 ChainTrace Forensics — Node2Vec Graph Embeddings
-Produces 64-dimensional node embeddings from the entity graph.
-Uses PyTorch Geometric's Node2Vec implementation where it is available, and a
-structural fallback where it is not.
+Produces 64-dimensional node embeddings from the entity graph, via PyTorch
+Geometric where available and a structural fallback where not.
 
-torch and torch-geometric are imported lazily. Random-walk Node2Vec training
-is the single most memory-hungry step in the pipeline, so on a small
-container (CT_LIGHT_MODE, or simply no torch installed) the structural
-embedder below runs instead — it is cheaper and weaker, and it keeps the
-"similar wallets" lookup working rather than failing the whole run.
+torch and torch-geometric are imported lazily. Random-walk training is the
+most memory-hungry step in the pipeline, so under CT_LIGHT_MODE (or with no
+torch installed) the structural embedder runs instead: cheaper and weaker,
+but it keeps the similar-wallets lookup working.
 """
 
 import numpy as np

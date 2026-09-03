@@ -4,22 +4,13 @@ import '@react-sigma/core/lib/style.css';
 import GraphCanvas from '../components/Graph/GraphCanvas';
 import NodeInspector from '../components/Graph/NodeInspector';
 import Icon from '../components/Icon';
+import { TYPE_LEGEND, RISK_LEGEND } from '../theme';
 import {
   getGraphData, getSubgraph, searchGraph,
   getNodeDetail, getNeighbors, findPath,
 } from '../services/api';
 
-const NODE_TYPES = [
-  { key: 'wallet', label: 'Wallets', color: '#5FD4D0' },
-  { key: 'transaction', label: 'Transactions', color: '#5C6473' },
-  { key: 'ip', label: 'IP addresses', color: '#B28EE0' },
-];
-
-const RISK_LEGEND = [
-  { color: '#EF4444', label: 'Critical' },
-  { color: '#F0883E', label: 'High' },
-  { color: '#E0B23C', label: 'Elevated' },
-];
+const NODE_TYPES = TYPE_LEGEND;
 
 const LAYOUTS = [
   { key: 'spring', label: 'Force-directed' },
@@ -74,8 +65,8 @@ export default function GraphExplorer() {
     () => new Set(pathResult?.found ? pathResult.path.map((p) => p.id) : []),
     [pathResult],
   );
-  // Edge keys are assigned by whoever serialised the graph, so the path's
-  // edges are identified by their endpoints rather than by key.
+  // Edge keys come from the serialiser, so path edges are matched on their
+  // endpoints instead.
   const pathEdges = useMemo(() => {
     const pairs = new Set();
     for (const hop of pathResult?.hops || []) {
@@ -106,9 +97,8 @@ export default function GraphExplorer() {
         setEmptyReason(data.reason || 'The graph is empty.');
       }
     } catch (e) {
-      // Distinguishing these two matters: a hosted frontend pointed at no
-      // backend and a backend with nothing ingested look identical on a blank
-      // canvas, and the fix for each is completely different.
+      // A frontend with no backend and a backend with no data look
+      // identical on a blank canvas but need different fixes.
       setError(
         e.response
           ? `Backend returned ${e.response.status} for /api/graph/data.`
@@ -127,9 +117,7 @@ export default function GraphExplorer() {
     setSelected(nodeId);
     setDetail({ id: nodeId, node_type: null });
     setDetailLoading(true);
-    // Centring is the point of selecting: the node the investigator just
-    // clicked (or picked out of search results) should end up in the middle of
-    // the viewport at a readable zoom, not stay wherever it happened to be.
+    // Selection centres the node at a readable zoom.
     if (center) control.current.focusOn?.(nodeId);
     try {
       const res = await getNodeDetail(nodeId);
@@ -211,8 +199,7 @@ export default function GraphExplorer() {
     const target = focusAfterLoad.current;
     if (target) {
       focusAfterLoad.current = null;
-      // One frame after load, so Sigma has laid the graph out and the node has
-      // display coordinates for the camera to fly to.
+      // One frame after load, once the node has display coordinates.
       requestAnimationFrame(() => selectNode(target));
     }
   }, [selectNode]);

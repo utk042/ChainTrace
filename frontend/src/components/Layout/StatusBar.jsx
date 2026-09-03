@@ -16,7 +16,7 @@ export default function StatusBar() {
       <div className="statusbar-left">
         <span>SYSTEM <b style={{
           color: status === 'down' ? 'var(--accent-critical)'
-            : isDemoMode() ? 'var(--accent-purple)' : 'var(--accent-green)',
+            : isDemoMode() ? 'var(--accent)' : 'var(--accent-green)',
         }}>
           {status === 'down' ? 'UNREACHABLE'
             : isDemoMode() ? 'SNAPSHOT'

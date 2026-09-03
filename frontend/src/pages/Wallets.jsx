@@ -38,7 +38,7 @@ export default function Wallets() {
   return (
     <div className="page-content fade-in">
       <div className="page-header">
-        <h1 className="page-title">Wallets ({total.toLocaleString()})</h1>
+        <h1 className="page-title">Wallets <span className="count">{total.toLocaleString()}</span></h1>
       </div>
 
       <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-xl)' }}>

@@ -11,14 +11,6 @@
 
 ChainTrace Forensics is a complete offline system that ingests bulk Bitcoin transaction/network metadata (CSV/JSON/XML), correlates network-layer (IP/port/timing) observations with blockchain-layer (wallet/TXID/amount) data, and applies AI/ML to detect anomalies, cluster entities, and generate prioritized, explainable investigative leads.
 
-## 📚 Documentation & Master Presentation
-
-Comprehensive materials for understanding, demonstrating, and defending the project:
-- **[Interactive Master Presentation (PPT Deck)](docs/presentation.html)**: 22-slide animated presentation deck viewable in any browser with keyboard navigation (`ArrowRight`/`Space`), fullscreen mode (`F`), and print-to-PDF support (`Cmd+P`). Clone the repo and open the file locally (GitHub doesn't render raw HTML inline).
-- **[Presentation Script & Slide Notes](docs/PRESENTATION.md)**: Slide-by-slide speech cues, jury defense strategies, and slide content.
-- **[Master Technical Workbook](docs/WORKBOOK.md)**: 40+ page in-depth reference handbook explaining the mathematics (Autoencoder, Louvain, Node2Vec, SHAP), Bitcoin UTXO forensics, system architecture, database schema, and jury Q&A defense.
-
-
 ## 🏗 Architecture
 
 | Layer | Technology | Purpose |

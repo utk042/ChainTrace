@@ -29,16 +29,12 @@ def _tx_count() -> int:
 
 def _resolve_graph() -> Optional[nx.Graph]:
     """
-    The entity graph, rebuilding it from DuckDB if this process doesn't have
-    one in memory yet.
+    The entity graph, rebuilt from DuckDB if this process has none in memory.
 
-    The graph lives in module state, so any process that didn't run the
-    pipeline itself — a fresh worker, a container restarted by the host, a
-    free-tier dyno woken from sleep — starts with `None` even though the
-    ingested data is sitting right there on disk. Returning an empty graph in
-    that case is what made the explorer come up blank "sometimes"; rebuilding
-    on demand costs one pass over the transactions table and makes the page
-    load deterministic instead.
+    The graph is module state, so a process that did not run the pipeline
+    itself (a fresh worker, a restarted container) holds None even when the
+    ingested data is on disk. Rebuilding costs one pass over the transactions
+    table and keeps the response deterministic.
     """
     G = get_entity_graph()
     if G is not None and G.number_of_nodes() > 0:
@@ -86,8 +82,8 @@ def get_graph_data(
             "The entity graph could not be built from the ingested data."
         )
 
-    # Optionally filter by node type, keeping each kept node's neighbourhood
-    # so the result is still a connected picture rather than a dust cloud.
+    # Filtering keeps each match's neighbourhood, so the result stays a
+    # connected graph rather than a set of isolated points.
     if node_type:
         seeds = [n for n, d in G.nodes(data=True) if d.get("node_type") == node_type]
         extended = set(seeds)
@@ -131,12 +127,8 @@ def get_entity_subgraph(entity_id: str, hops: int = 2, layout: str = "spring",
 @router.get("/neighbors/{entity_id:path}")
 def expand_entity(entity_id: str, limit: int = 60):
     """
-    One hop out from a node, as a nodes+edges fragment the frontend merges
-    into the graph it already has.
-
-    This is what "expand" should do — grow the picture the investigator has
-    been building, rather than replacing it with a fresh subgraph and
-    throwing away everything they'd already pulled onto the canvas.
+    One hop out from a node, as a nodes+edges fragment the client merges into
+    the graph it already holds rather than replacing it.
     """
     G = _resolve_graph()
     if G is None or entity_id not in G:
@@ -144,7 +136,7 @@ def expand_entity(entity_id: str, limit: int = 60):
 
     neighbors = list(G.neighbors(entity_id))
     total = len(neighbors)
-    # Highest-degree neighbours first: those are the ones that connect onward.
+    # Highest-degree neighbours first: those connect onward.
     neighbors.sort(key=lambda n: -G.degree(n))
     neighbors = neighbors[:limit]
 
@@ -191,13 +183,7 @@ def expand_entity(entity_id: str, limit: int = 60):
 
 @router.get("/path")
 def find_path(source: str, target: str, max_hops: int = 8):
-    """
-    Shortest connection between two entities.
-
-    The question an investigator actually asks of a link chart — "is this
-    wallet connected to that one, and how?" — which previously had no answer
-    anywhere in the product.
-    """
+    """Shortest connection between two entities, with the edge type per hop."""
     G = _resolve_graph()
     if G is None:
         return {"found": False, "reason": "No graph loaded."}
@@ -248,9 +234,8 @@ def find_path(source: str, target: str, max_hops: int = 8):
 @router.get("/node/{entity_id:path}")
 def node_detail(entity_id: str):
     """
-    Everything known about one entity, assembled for the inspector panel:
-    graph position, behavioural features, alerts raised against it, and its
-    strongest counterparties.
+    Full record for one entity: graph position, behavioural features, alerts
+    raised against it, and its strongest counterparties.
     """
     G = _resolve_graph()
     if G is None or entity_id not in G:
@@ -265,8 +250,7 @@ def node_detail(entity_id: str):
         nt = G.nodes[n].get("node_type", "unknown")
         neighbor_types[nt] = neighbor_types.get(nt, 0) + 1
 
-    # Strongest links first — for a wallet this surfaces the transactions
-    # moving the most value, which is where an investigator looks next.
+    # Highest-degree links first.
     counterparties = []
     for n in sorted(neighbors, key=lambda x: -G.degree(x))[:8]:
         edge = G.get_edge_data(entity_id, n) or {}
@@ -396,13 +380,8 @@ def list_clusters():
 @router.get("/search")
 def search_graph(q: str = "", limit: int = 20, node_type: Optional[str] = None):
     """
-    Search for entities in the graph by substring.
-
-    Ranked rather than first-come: exact match, then prefix, then substring,
-    with higher-degree and higher-risk nodes ahead of isolated ones — the
-    previous version stopped at the first 20 nodes iteration order happened
-    to hit, which for a long address prefix routinely missed the wallet the
-    investigator had typed out in full.
+    Substring search over entity ids, ranked exact -> prefix -> substring,
+    then by risk score and degree.
     """
     G = _resolve_graph()
     if not G or not q:

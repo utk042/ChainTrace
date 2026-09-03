@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { getDashboardStats, getTimeline, getRiskDistribution, getTopAlerts } from '../services/api';
+import {
+  RISK_COLORS, ACCENT, chartAxis, chartValueAxis, chartTooltip,
+} from '../theme';
 
-const RISK_COLORS = { Critical: '#ef4444', High: '#f0883e', Elevated: '#e0b23c', Low: '#5cb87a', Normal: '#3d4552' };
 const TIER_ORDER = ['Critical', 'High', 'Elevated', 'Low', 'Normal'];
 
 export default function Dashboard() {
@@ -31,41 +33,29 @@ export default function Dashboard() {
   const timelineOption = {
     backgroundColor: 'transparent',
     grid: { top: 20, right: 12, bottom: 28, left: 44 },
-    xAxis: {
+    xAxis: chartAxis({
       type: 'category',
       data: timeline.map(t => t.timestamp?.split('T')[0] || ''),
-      axisLine: { lineStyle: { color: '#262c36' } },
-      axisTick: { show: false },
-      axisLabel: { color: '#6b7280', fontSize: 10, fontFamily: 'IBM Plex Mono' },
-    },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: '#1a1e25' } },
-      axisLabel: { color: '#6b7280', fontSize: 10, fontFamily: 'IBM Plex Mono' },
-    },
+    }),
+    yAxis: chartValueAxis({ type: 'value' }),
     series: [
       {
         name: 'Transactions',
         type: 'bar',
         data: timeline.map(t => t.count),
-        itemStyle: { color: '#3d4552' },
-        barWidth: '55%',
+        // Volume is the baseline; the anomaly series on top is the signal.
+        itemStyle: { color: 'rgba(139, 124, 246, 0.38)' },
+        barWidth: '58%',
       },
       {
         name: 'Anomalies',
         type: 'bar',
         data: timeline.map(t => t.anomaly_count),
-        itemStyle: { color: '#ef4444' },
-        barWidth: '55%',
+        itemStyle: { color: RISK_COLORS.Critical },
+        barWidth: '58%',
       },
     ],
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: '#0e1116',
-      borderColor: '#262c36',
-      textStyle: { color: '#eef0f2', fontSize: 11, fontFamily: 'IBM Plex Mono' },
-    },
+    tooltip: chartTooltip({ trigger: 'axis' }),
   };
 
   return (
@@ -108,7 +98,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-header">
             <span className="card-title">Transaction Volume — Timeline</span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)' }}>anomalies highlighted</span>
+            <span className="card-meta">anomalies highlighted</span>
           </div>
           <ReactECharts option={timelineOption} style={{ height: 220 }} notMerge />
         </div>
@@ -138,12 +128,10 @@ export default function Dashboard() {
       </div>
 
       {/* Top Alerts */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="card-header" style={{ padding: 'var(--space-md) var(--space-lg)', margin: 0, borderBottom: '1px solid var(--border-primary)' }}>
+      <div className="card">
+        <div className="card-header">
           <span className="card-title">Prioritized Alerts</span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-tertiary)' }}>
-            {stats?.total_alerts || 0} PENDING
-          </span>
+          <span className="card-meta">{stats?.total_alerts || 0} pending</span>
         </div>
         <div className="alert-grid">
           {topAlerts.map((alert) => (

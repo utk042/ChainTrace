@@ -21,8 +21,8 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   config.baseURL = getApiBaseUrl();
-  // Demo mode is resolved per request rather than at module load, so toggling
-  // it in Settings takes effect on the next call instead of the next reload.
+  // Resolved per request, so toggling it in Settings takes effect on the
+  // next call rather than the next reload.
   config.adapter = isDemoMode() ? demoAdapter : undefined;
   return config;
 });

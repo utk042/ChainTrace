@@ -17,15 +17,10 @@ function formatUTC(date) {
   return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 }
 
-/**
- * The status pill previously read "OFFLINE MODE" unconditionally — a design
- * statement about the product, not a report of anything. It now says whether
- * this frontend is actually talking to a backend, which is the one thing a
- * blank-looking deployment needs it to say.
- */
+/** Connection states for the status pill. */
 const CONNECTION = {
   checking: { label: 'CONNECTING', color: 'var(--accent-elevated)' },
-  demo: { label: 'OFFLINE SNAPSHOT', color: 'var(--accent-purple)' },
+  demo: { label: 'OFFLINE SNAPSHOT', color: 'var(--accent)' },
   ready: { label: 'CONNECTED · LOCAL', color: 'var(--accent-green)' },
   empty: { label: 'CONNECTED · NO DATA', color: 'var(--accent-elevated)' },
   down: { label: 'BACKEND OFFLINE', color: 'var(--accent-critical)' },
@@ -34,8 +29,8 @@ const CONNECTION = {
 export default function TopBar() {
   const [stats, setStats] = useState(null);
   const { status: liveStatus } = useBackendStatus();
-  // Snapshot mode answers /api/health from bundled data, so the live check
-  // would otherwise report a healthy backend that isn't there.
+  // Snapshot mode answers /api/health from bundled data, which would
+  // otherwise report a healthy backend that isn't there.
   const status = isDemoMode() ? 'demo' : liveStatus;
   const now = useClock();
 

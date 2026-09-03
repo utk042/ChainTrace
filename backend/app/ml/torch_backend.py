@@ -3,10 +3,9 @@ ChainTrace Forensics — PyTorch Autoencoder backend
 Unsupervised anomaly detection via reconstruction error.
 Architecture: 16 → 32 → 16 → 8 → 16 → 32 → 16
 
-Imported lazily by app.ml.autoencoder, and only when torch is actually
-installed and the deployment has the memory for it — importing torch costs
-roughly 250 MB of RSS before a single tensor is allocated, which is most of
-a small container's budget. See app/ml/light.py for the alternative.
+Imported lazily by app.ml.autoencoder, only when torch is installed and the
+deployment has memory for it (~250 MB RSS at import). See app/ml/light.py
+for the alternative.
 """
 
 import torch
@@ -259,7 +258,6 @@ class TorchAnomalyDetector:
         return error.cpu().numpy()
 
 
-# Identifies which backend produced a given set of scores, so the UI and the
-# pipeline summary can be honest about what actually ran.
+# Reported in the pipeline summary and /api/health.
 BACKEND_NAME = "pytorch-autoencoder"
 TorchAnomalyDetector.backend_name = BACKEND_NAME

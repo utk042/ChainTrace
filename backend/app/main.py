@@ -35,9 +35,8 @@ async def lifespan(app: FastAPI):
             trainer._entity_graph = build_entity_graph()
             from app.graph.clustering import cluster_wallets
             trainer._clusters = cluster_wallets(trainer._entity_graph)
-            # The rebuilt graph knows nothing about the last run's scores until
-            # these are copied back on; without it a restarted backend serves a
-            # graph with every risk colour and anomaly score missing.
+            # Without this the rebuilt graph carries no anomaly scores or
+            # risk tiers, only topology.
             from app.graph.builder import apply_scores_from_db
             scored = apply_scores_from_db(trainer._entity_graph)
             print(f"  Restored scores for {scored} wallet(s)")
@@ -103,12 +102,8 @@ def root():
 @app.get("/api/health")
 def health():
     """
-    Liveness plus enough state for the UI to explain itself.
-
-    The frontend uses `has_data` to tell "the backend is down" apart from
-    "the backend is up but nothing has been ingested yet" — two situations
-    that previously both rendered as an empty screen with no explanation,
-    which is exactly what a fresh cloud deployment looks like on first load.
+    Liveness, plus the state the UI needs to distinguish an unreachable
+    backend from a reachable one with an empty database.
     """
     from app.ml.autoencoder import backend_name, backend_reason, is_light_mode
 

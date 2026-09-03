@@ -90,14 +90,11 @@ def build_entity_graph(con: duckdb.DuckDBPyConnection = None) -> nx.Graph:
 
 def apply_scores_from_db(G: nx.Graph, con: duckdb.DuckDBPyConnection = None) -> int:
     """
-    Copy anomaly scores, risk tiers and cluster ids from `wallet_features` onto
-    an already-built graph. Returns the number of nodes updated.
+    Copy anomaly scores, risk tiers and cluster ids from `wallet_features`
+    onto an already-built graph. Returns the number of nodes updated.
 
     build_entity_graph() reads the transactions table only, so a graph rebuilt
-    outside a pipeline run — at startup, or on demand in a worker that has
-    none — carries no scores at all. The explorer then renders every node in
-    the default type colour, and a restarted backend silently loses the risk
-    colouring that is the whole point of the link chart.
+    outside a pipeline run carries no scores until this runs.
     """
     own_connection = con is None
     if own_connection:

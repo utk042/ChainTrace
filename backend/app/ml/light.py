@@ -1,23 +1,17 @@
 """
 ChainTrace Forensics — Low-memory analysis backend
 
-A drop-in replacement for the PyTorch autoencoder that runs the same
-reconstruction-error anomaly detection using only NumPy and scikit-learn.
+A drop-in replacement for the PyTorch autoencoder using only NumPy and
+scikit-learn, for hosts that cannot afford torch: the import alone costs
+~250 MB resident, and Node2Vec training far more, which on a 512 MB
+container gets the process OOM-killed mid-pipeline.
 
-Why this exists: `import torch` alone costs ~250 MB of resident memory, and
-torch-geometric's Node2Vec training allocates far more on top of that. On a
-512 MB container — Render's free tier, a small VM, a locked-down analyst
-laptop — the process is killed before it scores a single wallet, which looks
-from the outside exactly like "the deployment doesn't load any data".
-
-The method here is a linear autoencoder: PCA to a low-dimensional bottleneck,
-then reconstruct and measure per-feature squared error. That is precisely what
-the neural autoencoder does, minus the non-linearity — same interface, same
-score semantics (higher error = more anomalous), same percentile threshold,
-same per-feature error vector for the explainer to attribute over. It is
-weaker at curved decision boundaries and stronger at nothing, so it is a
-fallback rather than a default: with torch present and memory to spare, the
-neural model still runs.
+The method is a linear autoencoder — PCA to a low-dimensional bottleneck,
+then reconstruct and measure per-feature squared error. Same interface and
+same score semantics as the neural model (higher error = more anomalous,
+percentile threshold, per-feature error vector for the explainer), without
+the non-linearity. Strictly weaker, so it is a fallback rather than a
+default.
 """
 
 import numpy as np
@@ -46,8 +40,7 @@ class PCAAnomalyDetector:
         self.pca: PCA | None = None
         self.threshold = 0.0
         self.is_trained = False
-        # Matches the neural model's bottleneck width so the two backends
-        # compress to the same number of latent dimensions.
+        # Same bottleneck width as the neural model.
         self.latent_dim = settings.AE_HIDDEN_DIMS[-1]
 
     # ── Training ──────────────────────────────────────────────────────
@@ -56,8 +49,8 @@ class PCAAnomalyDetector:
         Fit the projection on the wallet feature matrix.
 
         Extra keyword arguments (epochs, batch_size, learning_rate) are
-        accepted and ignored so the trainer can call either backend the same
-        way — a closed-form fit has no epochs to run.
+        accepted and ignored: the fit is closed-form, and the trainer calls
+        both backends the same way.
         """
         X_scaled = self.scaler.fit_transform(features)
 
@@ -75,8 +68,8 @@ class PCAAnomalyDetector:
               f"{explained:.1%} variance retained. Threshold: {self.threshold:.6f}")
 
         return {
-            # One "epoch": the fit is closed-form, but the trainer logs
-            # history["loss"][-1], so report the achieved reconstruction MSE.
+            # The trainer logs history["loss"][-1]; report the achieved
+            # reconstruction MSE as a single entry.
             "loss": [float(np.mean(errors))],
             "threshold": self.threshold,
             "mean_error": float(np.mean(errors)),
@@ -135,9 +128,8 @@ class PCAAnomalyDetector:
             print(f"  ⚠ Could not read {model_file} ({e}). Will refit.")
             return False
 
-        # Same self-healing check the neural backend does: a checkpoint from a
-        # different feature schema has the wrong width and is worse than
-        # useless, because it would silently score against the wrong columns.
+        # A checkpoint from a different feature schema has the wrong width
+        # and would score against the wrong columns.
         if components.shape[1] != settings.AE_INPUT_DIM:
             print(f"  ⚠ Saved model expects {components.shape[1]} features, current schema "
                   f"has {settings.AE_INPUT_DIM}. Discarding stale checkpoint, will refit.")
