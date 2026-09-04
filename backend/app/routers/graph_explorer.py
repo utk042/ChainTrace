@@ -69,7 +69,8 @@ def _empty_payload(reason: str) -> dict:
 @router.get("/data")
 def get_graph_data(
     layout: str = "spring",
-    max_nodes: int = 1500,
+    max_nodes: int = Query(1500, ge=1, le=20_000,
+                           description="Cap on nodes returned; the renderer stalls well before the upper bound."),
     node_type: Optional[str] = None,
     min_score: float = 0.0,
 ):
@@ -108,8 +109,11 @@ def get_graph_data(
 
 
 @router.get("/subgraph/{entity_id:path}")
-def get_entity_subgraph(entity_id: str, hops: int = 2, layout: str = "spring",
-                        max_nodes: int = 600):
+def get_entity_subgraph(entity_id: str,
+                        hops: int = Query(2, ge=1, le=6,
+                                          description="Traversal depth. Each hop multiplies the frontier, so this is bounded."),
+                        layout: str = "spring",
+                        max_nodes: int = Query(600, ge=1, le=20_000)):
     """Get N-hop subgraph around a specific entity."""
     G = _resolve_graph()
     if G is None:
@@ -125,7 +129,7 @@ def get_entity_subgraph(entity_id: str, hops: int = 2, layout: str = "spring",
 
 
 @router.get("/neighbors/{entity_id:path}")
-def expand_entity(entity_id: str, limit: int = 60):
+def expand_entity(entity_id: str, limit: int = Query(60, ge=1, le=5_000)):
     """
     One hop out from a node, as a nodes+edges fragment the client merges into
     the graph it already holds rather than replacing it.
@@ -182,7 +186,7 @@ def expand_entity(entity_id: str, limit: int = 60):
 
 
 @router.get("/path")
-def find_path(source: str, target: str, max_hops: int = 8):
+def find_path(source: str, target: str, max_hops: int = Query(8, ge=1, le=20)):
     """Shortest connection between two entities, with the edge type per hop."""
     G = _resolve_graph()
     if G is None:
@@ -378,7 +382,8 @@ def list_clusters():
 
 
 @router.get("/search")
-def search_graph(q: str = "", limit: int = 20, node_type: Optional[str] = None):
+def search_graph(q: str = "", limit: int = Query(20, ge=1, le=500),
+                 node_type: Optional[str] = None):
     """
     Substring search over entity ids, ranked exact -> prefix -> substring,
     then by risk score and degree.

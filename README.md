@@ -181,6 +181,31 @@ with no server, no install and no network. It carries no service worker —
 left to cache. (The PNG/JSON export buttons need a real browser context;
 everything else works.)
 
+### Checks
+
+```bash
+cd frontend
+npm run check:icons     # icon geometry — runs as part of `npm run build`
+npm run build
+npm run test:offline    # the offline-first acceptance test, in a real browser
+```
+
+`test:offline` drives Chromium through the whole promise: it loads the app,
+waits for the service worker to take control, stores data through
+**Settings → Offline & Data**, **kills the server**, then re-loads all seven
+routes and asserts they render from storage, are labelled as stored rather
+than live, and go back to live when the server returns.
+
+The server is killed rather than using Playwright's `context.setOffline()`,
+which only cuts the page's own network and not the fetches the service worker
+makes on its behalf — with the server still up, an "offline" page keeps
+receiving live data and the test passes while proving nothing.
+
+It needs a Chromium for Playwright (`npx playwright install chromium` once),
+or `CHROMIUM_EXECUTABLE=/path/to/chrome` if the machine already has one.
+Pass `--backend http://127.0.0.1:8000` to run it against a real backend
+instead of the bundled snapshot.
+
 ### Cloud deployment (Vercel + Render)
 
 Two things have to be right or the frontend comes up with no data:
@@ -317,6 +342,8 @@ Prototype/
     ├── scripts/
     │   ├── build-standalone.mjs  # Folds a build into one self-contained HTML file
     │   └── check-icons.mjs       # Fails the build on icon geometry outside the viewBox
+    ├── tests/
+    │   └── offline.spec.mjs      # Kills the server, asserts every route still renders
     └── src/
         ├── pages/            # 7 pages
         ├── components/
