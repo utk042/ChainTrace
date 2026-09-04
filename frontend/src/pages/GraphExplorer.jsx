@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import '@react-sigma/core/lib/style.css';
 import GraphCanvas from '../components/Graph/GraphCanvas';
 import NodeInspector from '../components/Graph/NodeInspector';
@@ -37,7 +37,10 @@ export default function GraphExplorer() {
   const [hovered, setHovered] = useState(null);
   const [expanding, setExpanding] = useState(false);
 
-  const [query, setQuery] = useState('');
+  // A ?q= on the URL is how the global search box in the top bar hands an
+  // identifier to this page, and it makes a search shareable as a link.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [query, setQuery] = useState(() => searchParams.get('q') || '');
   const [results, setResults] = useState([]);
   const [searchMatches, setSearchMatches] = useState(new Set());
 
@@ -136,6 +139,18 @@ export default function GraphExplorer() {
   }, []);
 
   // ── Search ──────────────────────────────────────────────────────
+  // Keep the URL in step with the box, so a reload or a shared link lands on
+  // the same search. `replace` keeps typing out of the history stack.
+  useEffect(() => {
+    const current = searchParams.get('q') || '';
+    const next = query.trim();
+    if (current === next) return;
+    const params = new URLSearchParams(searchParams);
+    if (next) params.set('q', next);
+    else params.delete('q');
+    setSearchParams(params, { replace: true });
+  }, [query, searchParams, setSearchParams]);
+
   useEffect(() => {
     if (query.trim().length < 2) {
       setResults([]);

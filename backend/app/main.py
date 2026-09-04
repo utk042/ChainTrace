@@ -2,12 +2,18 @@
 ChainTrace Forensics — FastAPI Application Entry Point
 """
 
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.database import init_database, get_db_readonly
 from app.routers import dashboard, alerts, graph_explorer, wallets, transactions, ingest, settings as settings_router
+
+logger = logging.getLogger("chaintrace")
 
 
 @asynccontextmanager
@@ -69,15 +75,50 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS.
+#
+# A wildcard origin and credentialed requests are mutually exclusive: every
+# browser rejects `Access-Control-Allow-Origin: *` on a credentialed request,
+# so advertising both means the permissive deployment silently fails the
+# stricter clients. ChainTrace's frontend sends no cookies or auth headers,
+# so credentials are only enabled when the origins are actually enumerated.
+_wildcard_origins = "*" in settings.CORS_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_origin_regex=r"https://.*\.vercel\.app",
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origin_regex=None if _wildcard_origins else r"https://.*\.vercel\.app",
+    allow_credentials=not _wildcard_origins,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    # The offline cache reads these to tell stored data from live data.
+    expose_headers=["x-chaintrace-cache", "x-chaintrace-cached-at"],
+    max_age=600,
 )
+
+# Graph payloads are large and highly repetitive JSON; on a free-tier host the
+# transfer dominates the response time.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Return JSON for an unhandled error rather than an HTML traceback page.
+
+    The frontend distinguishes an unreachable backend from a failing one by
+    the shape of the response; an HTML 500 body reads as neither. The detail
+    is logged server-side and deliberately not returned.
+    """
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_error",
+            "detail": "The backend failed to handle this request. See the server logs.",
+            "path": request.url.path,
+        },
+    )
 
 # Register routers
 app.include_router(dashboard.router)

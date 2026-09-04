@@ -2,9 +2,40 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
-      "comment": "SPA fallback for client-side routes only. /api must be excluded, or a build with no VITE_API_URL receives index.html for every API call and renders as an empty dataset with no error.",
-      "source": "/((?!api/).*)",
+      "comment": "SPA fallback for client-side routes only. /api must be excluded, or a build with no VITE_API_URL receives index.html for every API call and renders as an empty dataset with no error. sw.js and the manifest are excluded too: rewriting the worker to index.html would leave the app with no offline shell and no way to update one.",
+      "source": "/((?!api/|sw\\.js|manifest\\.webmanifest).*)",
       "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "comment": "Revalidate every load. A cached service worker keeps serving the previous build's precache, so a deployment reaches nobody until it expires.",
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, must-revalidate" },
+        { "key": "Service-Worker-Allowed", "value": "/" }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    },
+    {
+      "comment": "Content-hashed filenames: the bytes behind a URL never change.",
+      "source": "/assets/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/fonts/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" }
+      ]
     }
   ]
 }

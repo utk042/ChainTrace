@@ -1,0 +1,24 @@
+{
+  "name": "ChainTrace Forensics",
+  "short_name": "ChainTrace",
+  "description": "Bitcoin transaction monitoring and entity-graph analysis. Installs for offline use: the interface and the last data you loaded stay available with no network.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["business", "security", "utilities"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Alerts", "url": "/alerts", "description": "Prioritised anomaly alerts" },
+    { "name": "Graph Explorer", "url": "/graph", "description": "Entity relationship graph" },
+    { "name": "Wallets", "url": "/wallets", "description": "Wallet risk register" }
+  ]
+}

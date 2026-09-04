@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run check:icons && vite build",
     "preview": "vite preview",
-    "build:standalone": "vite build --mode standalone && node scripts/build-standalone.mjs"
+    "check:icons": "node scripts/check-icons.mjs",
+    "build:standalone": "npm run check:icons && vite build --mode standalone && node scripts/build-standalone.mjs"
   },
   "dependencies": {
     "@react-sigma/core": "^5.0.6",

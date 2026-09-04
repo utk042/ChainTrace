@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   getSettings, updateSettings, resetSettings, purgeCache,
   getSeedWallets, addSeedWallet, removeSeedWallet,
@@ -6,10 +6,12 @@ import {
 } from '../services/api';
 import { useBackendStatus } from '../hooks/useBackendStatus';
 import Icon from '../components/Icon';
+import OfflinePanel from '../components/OfflinePanel';
 
 const settingsSections = [
   { id: 'thresholds', label: 'Forensic Thresholds' },
   { id: 'watchlist', label: 'Seed Watchlist' },
+  { id: 'offline', label: 'Offline & Data' },
   { id: 'system', label: 'System' },
 ];
 
@@ -38,10 +40,20 @@ export default function Settings() {
     }, 800);
   };
 
-  useEffect(() => {
-    getSettings().then(res => setSettings_(res.data)).catch(() => {});
-    fetchSeedWallets();
+  // Kept so "Discard changes" can put the form back to what the backend
+  // actually holds, without touching the backend.
+  const [savedSettings, setSavedSettings] = useState({});
+
+  const loadSettings = useCallback(() => {
+    getSettings()
+      .then((res) => { setSettings_(res.data); setSavedSettings(res.data); })
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    loadSettings();
+    fetchSeedWallets();
+  }, [loadSettings]);
 
   const fetchSeedWallets = () => {
     getSeedWallets().then(res => setSeedWallets(res.data || [])).catch(() => {});
@@ -69,16 +81,35 @@ export default function Settings() {
     setSaving(true);
     try {
       await updateSettings(settings);
+      setSavedSettings(settings);
       setMessage('Settings saved successfully');
     } catch (e) { setMessage('Failed to save settings'); }
     setSaving(false);
     setTimeout(() => setMessage(null), 3000);
   };
 
+  /** Local-only: reverts the form to the stored values, changes nothing. */
+  const handleDiscard = () => {
+    setSettings_(savedSettings);
+    setMessage('Unsaved changes discarded');
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  /**
+   * Writes the factory defaults to the backend. This used to be wired to a
+   * button labelled "Discard Changes", which quietly overwrote an operator's
+   * whole configuration when they meant to undo one slider.
+   */
   const handleReset = async () => {
+    if (!window.confirm(
+      'Reset every forensic threshold on the backend to its factory default?\n\n'
+      + 'This overwrites the saved configuration for all users of this backend '
+      + 'and cannot be undone.',
+    )) return;
     try {
       const res = await resetSettings();
       setSettings_(res.data.settings);
+      setSavedSettings(res.data.settings);
       setMessage('Settings reset to defaults');
     } catch (e) { setMessage('Failed to reset'); }
     setTimeout(() => setMessage(null), 3000);
@@ -96,13 +127,17 @@ export default function Settings() {
     setSettings_(prev => ({ ...prev, [key]: value }));
   };
 
+  const dirty = JSON.stringify(settings) !== JSON.stringify(savedSettings);
+
   return (
     <div className="page-content fade-in">
       <div className="page-header">
         <h1 className="page-title">System Configuration</h1>
         <div className="page-actions">
-          <button className="btn btn-outline" onClick={handleReset}>Discard Changes</button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+          <button className="btn btn-outline" onClick={handleDiscard} disabled={!dirty}>
+            Discard Changes
+          </button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || !dirty}>
             {saving ? 'Saving...' : 'Deploy Config'}
           </button>
         </div>
@@ -304,6 +339,38 @@ export default function Settings() {
             </div>
           )}
 
+          {activeSection === 'offline' && (
+            <div>
+              <OfflinePanel />
+
+              <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
+                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-md)' }}>Offline Snapshot Mode</h2>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-md)', lineHeight: 1.6 }}>
+                  A different thing from the stored responses above: this serves a
+                  fixed run of the analysis pipeline (4,970 synthetic transactions)
+                  from data bundled into the build itself, so the whole interface
+                  is usable on a machine that has never reached a backend at all.
+                  Scores, alerts, clusters and graph structure are genuine pipeline
+                  output; nothing recomputes, and ingestion and settings changes
+                  are refused rather than faked.
+                </p>
+                <div className="settings-row" style={{ borderBottom: 'none' }}>
+                  <div className="settings-row-info">
+                    <h3 style={{ color: 'var(--text-primary)' }}>
+                      {demo ? 'Snapshot mode is on' : 'Snapshot mode is off'}
+                    </h3>
+                    <p>{demo
+                      ? 'All pages are reading from the bundled snapshot.'
+                      : 'All pages are reading from the configured backend.'}</p>
+                  </div>
+                  <button className={demo ? 'btn btn-secondary' : 'btn btn-outline'} onClick={toggleDemo}>
+                    {demo ? 'Switch to live backend' : 'Use offline snapshot'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeSection === 'system' && (
             <div>
               <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
@@ -364,40 +431,25 @@ export default function Settings() {
                 </div>
               </div>
 
-              <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
-                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-md)' }}>Offline Snapshot Mode</h2>
-                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-md)', lineHeight: 1.6 }}>
-                  Serves a stored run of the analysis pipeline (4,970 synthetic
-                  transactions) from data bundled into this build, so the whole
-                  interface is usable with no backend — on a hosted preview link,
-                  or on a machine with no network at all. Scores, alerts, clusters
-                  and graph structure are genuine pipeline output; nothing
-                  recomputes, and ingestion and settings changes are refused
-                  rather than faked.
-                </p>
-                <div className="settings-row" style={{ borderBottom: 'none' }}>
-                  <div className="settings-row-info">
-                    <h3 style={{ color: 'var(--text-primary)' }}>
-                      {demo ? 'Snapshot mode is on' : 'Snapshot mode is off'}
-                    </h3>
-                    <p>{demo
-                      ? 'All pages are reading from the bundled snapshot.'
-                      : 'All pages are reading from the configured backend.'}</p>
-                  </div>
-                  <button className={demo ? 'btn btn-secondary' : 'btn btn-outline'} onClick={toggleDemo}>
-                    {demo ? 'Switch to live backend' : 'Use offline snapshot'}
-                  </button>
-                </div>
-              </div>
-
               <div className="danger-zone">
                 <h3 style={{ marginBottom: 'var(--space-lg)' }}><Icon name="alertTriangle" size={13} /> System Reset</h3>
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <h3 style={{ color: 'var(--text-primary)' }}>Purge Server Cache</h3>
+                    <p>Clear cached graph nodes and temporary analysis files on the backend. Ingested transactions are not affected.</p>
+                  </div>
+                  <button className="btn btn-danger" onClick={handlePurge} disabled={demo || status === 'down'}>
+                    Execute Purge
+                  </button>
+                </div>
                 <div className="settings-row" style={{ borderBottom: 'none' }}>
                   <div className="settings-row-info">
-                    <h3 style={{ color: 'var(--text-primary)' }}>Purge Local Cache</h3>
-                    <p>Clear all locally cached graph nodes and temporary analysis files.</p>
+                    <h3 style={{ color: 'var(--text-primary)' }}>Reset Forensic Thresholds</h3>
+                    <p>Overwrite every threshold on the backend with its factory default, for every user of this backend.</p>
                   </div>
-                  <button className="btn btn-danger" onClick={handlePurge}>Execute Purge</button>
+                  <button className="btn btn-danger" onClick={handleReset} disabled={demo || status === 'down'}>
+                    Reset to Defaults
+                  </button>
                 </div>
               </div>
             </div>
