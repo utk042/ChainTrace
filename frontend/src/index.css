@@ -150,7 +150,6 @@
   --sidebar-width: 56px;
   --sidebar-collapsed: 48px;
   --topbar-height: 38px;
-  --statusbar-height: 26px;
 }
 
 /* ─── Reset & Base ─── */
@@ -409,10 +408,6 @@ a:hover {
   font-family: var(--font-mono);
 }
 
-.topbar-sep {
-  color: var(--border-hover);
-}
-
 .topbar-status {
   display: flex;
   align-items: center;
@@ -436,39 +431,6 @@ a:hover {
   color: var(--text-secondary);
   font-size: var(--text-sm);
   white-space: nowrap;
-}
-
-/* ─── Status Bar ─── */
-
-.statusbar {
-  height: var(--statusbar-height);
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border-primary);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 var(--space-xl);
-  flex-shrink: 0;
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-  color: var(--text-tertiary);
-}
-
-.statusbar-left,
-.statusbar-right {
-  display: flex;
-  gap: var(--space-xl);
-  align-items: center;
-}
-
-.statusbar-right a {
-  color: var(--text-tertiary);
-  text-decoration: none;
-}
-
-.statusbar-right a:hover {
-  color: var(--accent);
-  text-decoration: underline;
 }
 
 /* ─── Cards ─── */
@@ -1259,7 +1221,7 @@ a:hover {
 .update-prompt {
   position: fixed;
   right: var(--space-lg);
-  bottom: calc(var(--space-lg) + 26px);
+  bottom: var(--space-lg);
   z-index: 60;
   display: flex;
   align-items: center;
@@ -2450,21 +2412,6 @@ a:hover {
 
   .stat-card .stat-value {
     font-size: var(--text-xl);
-  }
-
-  /* Status Bar */
-  .statusbar {
-    padding: 0 var(--space-md);
-    font-size: 0.65rem;
-  }
-
-  .statusbar-right {
-    display: none;
-  }
-
-  .statusbar-left {
-    width: 100%;
-    justify-content: space-between;
   }
 
   /* Wallets / Transactions split view */
