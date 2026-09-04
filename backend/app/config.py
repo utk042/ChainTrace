@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     API_PORT: int = int(os.environ.get("PORT", 8000))
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
+    # ── Deployment profile ─────────────────────────────────────────────
+    # Light mode swaps the PyTorch autoencoder for a PCA linear autoencoder
+    # and skips Node2Vec and SHAP. Set CT_LIGHT_MODE=true on hosts under
+    # ~1.5 GB RAM: torch costs ~250 MB at import and Node2Vec training on a
+    # 5k-transaction graph peaks well past a 512 MB budget.
+    # See app/ml/light.py for the substitutes.
+    LIGHT_MODE: bool = False
+
     # ── ML / Autoencoder ───────────────────────────────────────────────
     # 13 behavioral features + peel_chain_depth + mixer_interaction_count +
     # darknet_proximity_score (see app/ml/features.py FEATURE_NAMES).

@@ -39,7 +39,7 @@ export default function Alerts() {
   return (
     <div className="page-content fade-in">
       <div className="page-header">
-        <h1 className="page-title">Active Alerts ({total.toLocaleString()})</h1>
+        <h1 className="page-title">Active Alerts <span className="count">{total.toLocaleString()}</span></h1>
         <div className="page-actions">
           <button className="btn btn-outline" onClick={handleExport}><Icon name="download" size={13} /> Export CSV</button>
         </div>

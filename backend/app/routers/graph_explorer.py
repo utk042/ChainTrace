@@ -1,15 +1,69 @@
 """
 ChainTrace Forensics — Graph Explorer Router
-Serves graph data and subgraph queries for the Sigma.js frontend.
+Serves graph data, entity detail, expansion and path queries for the
+Sigma.js frontend.
 """
 
+import networkx as nx
 from fastapi import APIRouter, Query
-from app.ml.trainer import get_entity_graph, get_clusters
-from app.graph.serializer import graph_to_json
-from app.graph.builder import get_subgraph, get_graph_stats
 from typing import Optional
 
+from app.database import get_db_readonly
+from app.graph.builder import (
+    get_subgraph, get_graph_stats, build_entity_graph, apply_scores_from_db,
+)
+from app.graph.serializer import graph_to_json, NODE_COLORS, RISK_COLORS, _node_size, _truncate
+from app.ml.trainer import get_entity_graph, get_clusters
+
 router = APIRouter(prefix="/api/graph", tags=["Graph Explorer"])
+
+
+def _tx_count() -> int:
+    """Number of transactions on disk, 0 if the table isn't reachable."""
+    try:
+        with get_db_readonly() as con:
+            return con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    except Exception:
+        return 0
+
+
+def _resolve_graph() -> Optional[nx.Graph]:
+    """
+    The entity graph, rebuilt from DuckDB if this process has none in memory.
+
+    The graph is module state, so a process that did not run the pipeline
+    itself (a fresh worker, a restarted container) holds None even when the
+    ingested data is on disk. Rebuilding costs one pass over the transactions
+    table and keeps the response deterministic.
+    """
+    G = get_entity_graph()
+    if G is not None and G.number_of_nodes() > 0:
+        return G
+
+    if _tx_count() == 0:
+        return None
+
+    from app.ml import trainer
+    try:
+        G = build_entity_graph()
+        trainer._entity_graph = G
+        if trainer._clusters is None:
+            from app.graph.clustering import cluster_wallets
+            trainer._clusters = cluster_wallets(G)
+        apply_scores_from_db(G)
+        return G
+    except Exception as e:
+        print(f"⚠ On-demand graph rebuild failed: {e}")
+        return None
+
+
+def _empty_payload(reason: str) -> dict:
+    return {
+        "nodes": [], "edges": [], "clusters": {},
+        "stats": {"total_nodes": 0, "total_edges": 0, "cluster_count": 0},
+        "ready": False,
+        "reason": reason,
+    }
 
 
 @router.get("/data")
@@ -17,53 +71,304 @@ def get_graph_data(
     layout: str = "spring",
     max_nodes: int = 1500,
     node_type: Optional[str] = None,
+    min_score: float = 0.0,
 ):
     """Get full graph data for visualization."""
-    G = get_entity_graph()
+    G = _resolve_graph()
     if G is None:
-        return {"nodes": [], "edges": [], "clusters": {}, "stats": {}}
+        return _empty_payload(
+            "No data ingested yet. Run the pipeline from the Ingest page."
+            if _tx_count() == 0 else
+            "The entity graph could not be built from the ingested data."
+        )
 
-    # Optionally filter by node type
+    # Filtering keeps each match's neighbourhood, so the result stays a
+    # connected graph rather than a set of isolated points.
     if node_type:
-        nodes = [n for n, d in G.nodes(data=True) if d.get("node_type") == node_type]
-        # Include connected nodes
-        extended = set(nodes)
-        for n in nodes:
-            for neighbor in G.neighbors(n):
-                extended.add(neighbor)
+        seeds = [n for n, d in G.nodes(data=True) if d.get("node_type") == node_type]
+        extended = set(seeds)
+        for n in seeds:
+            extended.update(G.neighbors(n))
         G = G.subgraph(extended).copy()
 
-    graph_data = graph_to_json(G, layout=layout, max_nodes=max_nodes)
-    return graph_data.model_dump()
+    if min_score > 0:
+        seeds = [n for n, d in G.nodes(data=True)
+                 if (d.get("anomaly_score") or 0.0) >= min_score]
+        extended = set(seeds)
+        for n in seeds:
+            extended.update(G.neighbors(n))
+        G = G.subgraph(extended).copy()
+
+    if G.number_of_nodes() == 0:
+        return _empty_payload("No entities match the current filters.")
+
+    payload = graph_to_json(G, layout=layout, max_nodes=max_nodes).model_dump()
+    payload["ready"] = True
+    return payload
 
 
-@router.get("/subgraph/{entity_id}")
-def get_entity_subgraph(entity_id: str, hops: int = 2, layout: str = "spring"):
+@router.get("/subgraph/{entity_id:path}")
+def get_entity_subgraph(entity_id: str, hops: int = 2, layout: str = "spring",
+                        max_nodes: int = 600):
     """Get N-hop subgraph around a specific entity."""
-    G = get_entity_graph()
-    if G is None or entity_id not in G:
-        return {"nodes": [], "edges": [], "clusters": {}, "stats": {}}
+    G = _resolve_graph()
+    if G is None:
+        return _empty_payload("No data ingested yet.")
+    if entity_id not in G:
+        return _empty_payload(f"'{entity_id}' is not present in the current graph.")
 
     sub = get_subgraph(G, entity_id, hops=hops)
-    graph_data = graph_to_json(sub, layout=layout, max_nodes=500)
-    return graph_data.model_dump()
+    payload = graph_to_json(sub, layout=layout, max_nodes=max_nodes).model_dump()
+    payload["ready"] = True
+    payload["focus"] = entity_id
+    return payload
+
+
+@router.get("/neighbors/{entity_id:path}")
+def expand_entity(entity_id: str, limit: int = 60):
+    """
+    One hop out from a node, as a nodes+edges fragment the client merges into
+    the graph it already holds rather than replacing it.
+    """
+    G = _resolve_graph()
+    if G is None or entity_id not in G:
+        return {"nodes": [], "edges": [], "truncated": False, "total_neighbors": 0}
+
+    neighbors = list(G.neighbors(entity_id))
+    total = len(neighbors)
+    # Highest-degree neighbours first: those connect onward.
+    neighbors.sort(key=lambda n: -G.degree(n))
+    neighbors = neighbors[:limit]
+
+    keep = set(neighbors) | {entity_id}
+    sub = G.subgraph(keep)
+
+    nodes = []
+    for node_id in keep:
+        data = G.nodes[node_id]
+        node_type = data.get("node_type", "unknown")
+        tier = data.get("risk_tier", "Normal")
+        score = data.get("anomaly_score") or 0.0
+        degree = G.degree(node_id)
+        nodes.append({
+            "id": node_id,
+            "label": _truncate(node_id),
+            "node_type": node_type,
+            "size": _node_size(node_type, degree, score),
+            "color": RISK_COLORS.get(tier) or NODE_COLORS.get(node_type, "#5C6473"),
+            "cluster_id": data.get("cluster_id"),
+            "risk_tier": tier if tier != "Normal" else None,
+            "anomaly_score": score if score > 0 else None,
+            "metadata": {"degree": degree},
+        })
+
+    edges = [
+        {
+            "id": f"x{i}",
+            "source": u,
+            "target": v,
+            "edge_type": d.get("edge_type", "unknown"),
+            "weight": d.get("weight", 1.0),
+        }
+        for i, (u, v, d) in enumerate(sub.edges(data=True))
+    ]
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "truncated": total > limit,
+        "total_neighbors": total,
+    }
+
+
+@router.get("/path")
+def find_path(source: str, target: str, max_hops: int = 8):
+    """Shortest connection between two entities, with the edge type per hop."""
+    G = _resolve_graph()
+    if G is None:
+        return {"found": False, "reason": "No graph loaded."}
+    if source not in G:
+        return {"found": False, "reason": f"'{source}' not in graph."}
+    if target not in G:
+        return {"found": False, "reason": f"'{target}' not in graph."}
+    if source == target:
+        return {"found": False, "reason": "Source and target are the same entity."}
+
+    try:
+        path = nx.shortest_path(G, source, target)
+    except nx.NetworkXNoPath:
+        return {"found": False, "reason": "No connecting path exists in the graph."}
+
+    if len(path) - 1 > max_hops:
+        return {
+            "found": False,
+            "reason": f"Shortest path is {len(path) - 1} hops, beyond the {max_hops}-hop limit.",
+        }
+
+    hops = []
+    for u, v in zip(path, path[1:]):
+        data = G.get_edge_data(u, v) or {}
+        hops.append({
+            "source": u,
+            "target": v,
+            "edge_type": data.get("edge_type", "unknown"),
+            "amount": data.get("amount"),
+        })
+
+    return {
+        "found": True,
+        "path": [
+            {
+                "id": n,
+                "node_type": G.nodes[n].get("node_type", "unknown"),
+                "risk_tier": G.nodes[n].get("risk_tier"),
+                "anomaly_score": G.nodes[n].get("anomaly_score"),
+            }
+            for n in path
+        ],
+        "hops": hops,
+        "length": len(path) - 1,
+    }
+
+
+@router.get("/node/{entity_id:path}")
+def node_detail(entity_id: str):
+    """
+    Full record for one entity: graph position, behavioural features, alerts
+    raised against it, and its strongest counterparties.
+    """
+    G = _resolve_graph()
+    if G is None or entity_id not in G:
+        return {"found": False, "id": entity_id}
+
+    data = dict(G.nodes[entity_id])
+    node_type = data.get("node_type", "unknown")
+    neighbors = list(G.neighbors(entity_id))
+
+    neighbor_types: dict[str, int] = {}
+    for n in neighbors:
+        nt = G.nodes[n].get("node_type", "unknown")
+        neighbor_types[nt] = neighbor_types.get(nt, 0) + 1
+
+    # Highest-degree links first.
+    counterparties = []
+    for n in sorted(neighbors, key=lambda x: -G.degree(x))[:8]:
+        edge = G.get_edge_data(entity_id, n) or {}
+        counterparties.append({
+            "id": n,
+            "node_type": G.nodes[n].get("node_type", "unknown"),
+            "edge_type": edge.get("edge_type", "unknown"),
+            "amount": edge.get("amount"),
+            "risk_tier": G.nodes[n].get("risk_tier"),
+            "anomaly_score": G.nodes[n].get("anomaly_score"),
+            "degree": G.degree(n),
+        })
+
+    detail = {
+        "found": True,
+        "id": entity_id,
+        "node_type": node_type,
+        "degree": G.degree(entity_id),
+        "cluster_id": data.get("cluster_id"),
+        "risk_tier": data.get("risk_tier"),
+        "anomaly_score": data.get("anomaly_score"),
+        "neighbor_types": neighbor_types,
+        "counterparties": counterparties,
+        "attributes": {k: v for k, v in data.items()
+                       if k not in ("node_type", "cluster_id", "risk_tier", "anomaly_score")},
+        "features": None,
+        "alerts": [],
+        "geo": None,
+    }
+
+    try:
+        with get_db_readonly() as con:
+            if node_type == "wallet":
+                row = con.execute("""
+                    SELECT tx_count, total_received, total_sent, fan_in_degree,
+                           fan_out_degree, avg_tx_amount, velocity_1h, velocity_24h,
+                           round_amount_ratio, unique_ips, unique_countries,
+                           first_seen, last_seen, age_days, cluster_id,
+                           anomaly_score, risk_tier, peel_chain_depth, peel_chain_role,
+                           mixer_interaction_count, darknet_proximity_hops
+                    FROM wallet_features WHERE address = ?
+                """, (entity_id,)).fetchone()
+                if row:
+                    keys = ["tx_count", "total_received", "total_sent", "fan_in_degree",
+                            "fan_out_degree", "avg_tx_amount", "velocity_1h", "velocity_24h",
+                            "round_amount_ratio", "unique_ips", "unique_countries",
+                            "first_seen", "last_seen", "age_days", "cluster_id",
+                            "anomaly_score", "risk_tier", "peel_chain_depth",
+                            "peel_chain_role", "mixer_interaction_count",
+                            "darknet_proximity_hops"]
+                    features = {k: (str(v) if k in ("first_seen", "last_seen") and v else v)
+                                for k, v in zip(keys, row)}
+                    detail["features"] = features
+                    detail["risk_tier"] = features.get("risk_tier") or detail["risk_tier"]
+                    if features.get("anomaly_score"):
+                        detail["anomaly_score"] = features["anomaly_score"]
+
+            elif node_type == "ip":
+                row = con.execute("""
+                    SELECT country, city, asn, org, latitude, longitude, hit_count
+                    FROM ip_metadata WHERE ip_address = ?
+                """, (entity_id,)).fetchone()
+                if row:
+                    detail["geo"] = dict(zip(
+                        ["country", "city", "asn", "org", "latitude", "longitude", "hit_count"],
+                        row))
+
+            elif node_type == "transaction":
+                row = con.execute("""
+                    SELECT timestamp, src_ip, dst_ip, fee, script_type,
+                           input_addresses, output_addresses,
+                           input_amounts, output_amounts
+                    FROM transactions WHERE txid = ?
+                """, (entity_id,)).fetchone()
+                if row:
+                    detail["features"] = {
+                        "timestamp": str(row[0]) if row[0] else None,
+                        "src_ip": row[1], "dst_ip": row[2], "fee": row[3],
+                        "script_type": row[4],
+                        "input_count": len(row[5] or []),
+                        "output_count": len(row[6] or []),
+                        "total_input": sum(row[7] or []),
+                        "total_output": sum(row[8] or []),
+                    }
+
+            alert_rows = con.execute("""
+                SELECT alert_id, risk_tier, confidence, model, description, status
+                FROM alerts WHERE entity_id = ?
+                ORDER BY confidence DESC LIMIT 5
+            """, (entity_id,)).fetchall()
+            detail["alerts"] = [
+                {"alert_id": a[0], "risk_tier": a[1], "confidence": a[2],
+                 "model": a[3], "description": a[4], "status": a[5]}
+                for a in alert_rows
+            ]
+    except Exception as e:
+        print(f"⚠ node_detail enrichment failed for {entity_id}: {e}")
+
+    return detail
 
 
 @router.get("/stats")
 def get_stats():
     """Get graph statistics."""
-    G = get_entity_graph()
+    G = _resolve_graph()
     if G is None:
-        return {"total_nodes": 0, "total_edges": 0}
+        return {"total_nodes": 0, "total_edges": 0, "ready": False}
 
-    return get_graph_stats(G)
+    stats = get_graph_stats(G)
+    stats["ready"] = True
+    return stats
 
 
 @router.get("/clusters")
 def list_clusters():
     """List all wallet clusters with summary stats."""
     from app.graph.clustering import get_cluster_summary
-    G = get_entity_graph()
+    G = _resolve_graph()
     clusters = get_clusters()
 
     if not G or not clusters:
@@ -73,24 +378,49 @@ def list_clusters():
 
 
 @router.get("/search")
-def search_graph(q: str = "", limit: int = 20):
-    """Search for entities in the graph by ID prefix."""
-    G = get_entity_graph()
+def search_graph(q: str = "", limit: int = 20, node_type: Optional[str] = None):
+    """
+    Substring search over entity ids, ranked exact -> prefix -> substring,
+    then by risk score and degree.
+    """
+    G = _resolve_graph()
     if not G or not q:
         return []
 
     q_lower = q.lower()
-    results = []
+    scored = []
 
     for node, data in G.nodes(data=True):
-        if q_lower in node.lower():
-            results.append({
-                "id": node,
-                "node_type": data.get("node_type", "unknown"),
-                "risk_tier": data.get("risk_tier"),
-                "anomaly_score": data.get("anomaly_score"),
-            })
-            if len(results) >= limit:
-                break
+        if node_type and data.get("node_type") != node_type:
+            continue
+        node_lower = node.lower()
+        if q_lower not in node_lower:
+            continue
 
-    return results
+        if node_lower == q_lower:
+            rank = 0
+        elif node_lower.startswith(q_lower):
+            rank = 1
+        else:
+            rank = 2
+
+        scored.append((
+            rank,
+            -(data.get("anomaly_score") or 0.0),
+            -G.degree(node),
+            node,
+            data,
+        ))
+
+    scored.sort(key=lambda t: t[:4])
+
+    return [
+        {
+            "id": node,
+            "node_type": data.get("node_type", "unknown"),
+            "risk_tier": data.get("risk_tier"),
+            "anomaly_score": data.get("anomaly_score"),
+            "degree": G.degree(node),
+        }
+        for _, _, _, node, data in scored[:limit]
+    ]

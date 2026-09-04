@@ -6,7 +6,22 @@ services:
     dockerContext: .
     plan: free
     region: oregon
+
+    # The free instance has 512 MB of RAM, which the full dependency set
+    # cannot run in: torch reserves ~250 MB at import and Node2Vec training
+    # peaks well past the rest, so the container is OOM-killed mid-pipeline.
+    # DEPS=light + CT_LIGHT_MODE swaps in the NumPy/scikit-learn backends.
+    # Drop both on a 2 GB+ instance to restore the neural autoencoder,
+    # Node2Vec embeddings and SHAP attribution.
+    dockerfileArgs:
+      DEPS: light
+
     envVars:
+      - key: CT_LIGHT_MODE
+        value: "true"
+      # Free instances have no persistent disk: the filesystem resets on every
+      # deploy and every wake from sleep, so ingested data does not survive a
+      # cold start. Attach a disk at /app/data on a paid plan to keep it.
       - key: CT_DUCKDB_PATH
         value: /app/data/chaintrace.duckdb
       - key: CT_CORS_ORIGINS
@@ -14,3 +29,9 @@ services:
       - key: PYTHONUNBUFFERED
         value: "1"
     healthCheckPath: /api/health
+
+    # Uncomment on a paid plan to persist ingested data across restarts:
+    # disk:
+    #   name: chaintrace-data
+    #   mountPath: /app/data
+    #   sizeGB: 1

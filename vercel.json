@@ -4,7 +4,8 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
-      "source": "/(.*)",
+      "comment": "SPA fallback for client-side routes only. /api must be excluded: a catch-all rewrite answers API calls with index.html and HTTP 200, so a missing VITE_API_URL fails silently as an empty dataset instead of a 404.",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
