@@ -13,22 +13,69 @@ ChainTrace Forensics is a complete offline system that ingests bulk Bitcoin tran
 
 ## 🏗 Architecture
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Storage** | DuckDB (embedded OLAP) | Analytical queries, no server needed |
-| **Validation** | Pydantic v2 | Strict schema validation for ingested data |
-| **GeoIP** | MaxMind GeoLite2 | Offline IP → Country/ASN enrichment |
-| **Graph** | NetworkX + Louvain | Entity graph construction + common-input-ownership wallet clustering |
-| **Pattern Detection** | Custom structural detectors | Peeling-chain, CoinJoin-like mixing, fan-in/fan-out consolidation hubs |
-| **Risk Propagation** | BFS + hop-decay | Spreads risk from operator-maintained seed/watchlist wallets |
-| **ML** | PyTorch Autoencoder (or a PCA linear autoencoder in light mode) | Unsupervised anomaly detection (reconstruction error) |
-| **Embeddings** | Node2Vec (PyG) | 64-dim graph embeddings — refines wallet clusters and powers similar-wallet lookup |
-| **Explainability** | SHAP KernelExplainer | Per-feature attribution for each alert |
-| **Real Data** | httpx + Blockstream Esplora API | Optional live fetch of real, verifiable on-chain transactions |
-| **API** | FastAPI | REST endpoints serving all data |
-| **Frontend** | React + Vite | Dark forensic dashboard |
-| **Visualization** | Sigma.js + ECharts | Interactive link-analysis graph + charts |
-| **Deployment** | Docker Compose | Single-command offline deployment; light profile fits a 512 MB instance |
+Every choice below is constrained by one requirement: the system has to run
+**fully offline on a single machine**, with no database server, no cloud
+service and no outbound network call. That rules out most of the obvious
+answers (Postgres, Neo4j, a hosted vector store, a CDN) and explains almost
+every row in this table.
+
+### Backend
+
+| Layer | Technology | What it does | Why this one |
+|---|---|---|---|
+| **Language** | Python 3.11 | Whole backend | The graph + ML libraries this problem needs (NetworkX, PyTorch, scikit-learn, SHAP) only coexist comfortably in Python |
+| **API** | FastAPI + Uvicorn | REST endpoints for every page | Pydantic-native, so the validation layer and the API schema are the same objects; async support for the long-running pipeline |
+| **Storage** | DuckDB | Transactions, wallet features, alerts, settings | Embedded OLAP — no server process to install or run offline, but columnar so the aggregate queries the dashboard needs stay fast. SQLite would be embedded but row-oriented; Postgres would be columnar-ish but needs a server |
+| **Validation** | Pydantic v2 | Schema enforcement on every ingested record | Evidence data has to be rejected loudly, not coerced silently. v2's Rust core also makes validating 5k+ records cheap |
+| **Parsing** | lxml, csv, json (stdlib) | CSV / JSON / XML ingestion | lxml for XML only; the stdlib covers the rest, so this is one dependency instead of three |
+| **GeoIP** | geoip2 + MaxMind GeoLite2 | IP → country / ASN enrichment | The only GeoIP option that works from a local `.mmdb` file with no API call. Degrades to a deterministic fallback when the database isn't present |
+| **Graph** | NetworkX | Entity graph (wallet / tx / IP nodes) | Pure-Python, no server, and the algorithms needed here (BFS, shortest path, ego subgraphs, connected components) are all built in. Neo4j would mean running a database |
+| **Clustering** | python-louvain | Common-input-ownership wallet clustering | Standard Louvain implementation that operates directly on a NetworkX graph |
+| **Pattern detection** | Custom SQL + graph traversal | Peeling chains, CoinJoin-like mixing, consolidation hubs | These are structural definitions, not learned ones — writing them explicitly makes them auditable and gives an investigator a reason, not a score |
+| **Risk propagation** | BFS + exponential hop decay | Spreads risk from watchlisted wallets | Deterministic and explainable: "3 hops from a known-illicit address" is defensible in a way a model output is not |
+| **Live data** | httpx + Blockstream Esplora | Optional fetch of real on-chain transactions | Free, no API key, and every txid it returns is independently verifiable on any block explorer |
+
+### Analysis backends — two profiles
+
+The same pipeline runs under either profile; only the models swap. Selected
+automatically by `CT_LIGHT_MODE` or by whether torch is importable.
+
+| Step | Full profile | Light profile | Why two |
+|---|---|---|---|
+| **Anomaly detection** | PyTorch autoencoder (16→32→16→8→…) | PCA linear autoencoder (NumPy + scikit-learn) | `import torch` alone reserves ~250 MB. On a 512 MB host the process is OOM-killed before scoring a single wallet. PCA is the same method minus the non-linearity: same reconstruction-error semantics, same percentile threshold, same per-feature error vector |
+| **Embeddings** | Node2Vec (PyTorch Geometric) | Structural (degree, neighbour degree, clustering coefficient) | Random-walk training is the pipeline's heaviest step. The fallback is weaker but keeps the similar-wallets lookup working instead of failing the run |
+| **Explainability** | SHAP KernelExplainer | Per-feature reconstruction error | KernelExplainer re-evaluates the model over thousands of masked coalitions per wallet — unaffordable in 512 MB. The fallback is coarser attribution over the same quantity |
+| **Install size** | ~2.5 GB | ~120 MB | |
+| **Peak RSS (5k tx)** | ~1.2 GB | ~450 MB | |
+
+Ingestion, the entity graph, Louvain clustering, all structural detectors,
+risk propagation and the entire API surface are **identical** in both — none
+of them ever depended on torch. The active profile is reported in the status
+bar and in Settings → System, so nobody has to guess which model produced a
+score.
+
+### Frontend
+
+| Layer | Technology | What it does | Why this one |
+|---|---|---|---|
+| **Framework** | React 19 | All seven pages | Team familiarity; the graph explorer's state (selection, filters, path, expansions) is genuinely complex enough to want a component model |
+| **Build** | Vite 6 | Dev server, bundling, code-splitting | Fast HMR, and its `manualChunks` / `inlineDynamicImports` control is what makes both the code-split build and the single-file build possible from one config |
+| **Routing** | React Router 7 | Client-side routes | `BrowserRouter` normally, `HashRouter` in the standalone build (no server to map paths onto `index.html`) |
+| **Graph** | Sigma.js 3 + Graphology | WebGL link-analysis canvas | Canvas/SVG renderers stall in the low thousands of nodes; Sigma is WebGL and handles 1,500+ smoothly. Graphology is its data model and gives the shortest-path and traversal primitives |
+| **Layout** | graphology-layout-forceatlas2 | In-browser "Re-layout" | Lets an investigator untangle the current view without a server round-trip |
+| **Charts** | ECharts | Timeline and distribution | Canvas-rendered, so it stays smooth with dense time series; lazily loaded so only the Dashboard pays its 1.1 MB |
+| **HTTP** | Axios | API client | Its custom-adapter hook is what makes offline snapshot mode a ~200-line file instead of a rewrite of every call site |
+| **Fonts** | IBM Plex Sans / Mono, self-hosted | Typography | Self-hosted from `public/fonts` (116 KB). A Google Fonts `@import` blocks first paint on an air-gapped machine and leaks every page load on a connected one |
+| **Styling** | Hand-written CSS custom properties | Design system | ~250 tokens in one file. No Tailwind/CSS-in-JS: nothing to configure, nothing extra in the bundle, and the palette can be re-themed by editing one block |
+
+### Deployment
+
+| Concern | Technology | Why |
+|---|---|---|
+| **Offline / on-prem** | Docker Compose | One command, two containers, nginx proxying `/api` — no API URL to configure |
+| **Cloud backend** | Docker on Render | `DEPS=light` build arg + `CT_LIGHT_MODE` so it fits a 512 MB free instance |
+| **Cloud frontend** | Static build on Vercel | `VITE_API_URL` at build time; the SPA rewrite deliberately excludes `/api` so a missing backend URL fails loudly instead of returning HTML to every API call |
+| **Single file** | `npm run build:standalone` | Inlines scripts, styles, fonts and a pipeline snapshot into one HTML file that runs from `file://` with no server, network or backend |
 
 ## 🚀 Quick Start
 
