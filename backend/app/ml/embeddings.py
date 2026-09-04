@@ -1,24 +1,39 @@
 """
 ChainTrace Forensics — Node2Vec Graph Embeddings
-Produces 64-dimensional node embeddings from the entity graph.
-Uses PyTorch Geometric's Node2Vec implementation.
+Produces 64-dimensional node embeddings from the entity graph, via PyTorch
+Geometric where available and a structural fallback where not.
+
+torch and torch-geometric are imported lazily. Random-walk training is the
+most memory-hungry step in the pipeline, so under CT_LIGHT_MODE (or with no
+torch installed) the structural embedder runs instead: cheaper and weaker,
+but it keeps the similar-wallets lookup working.
 """
 
-import torch
 import numpy as np
 import networkx as nx
 from pathlib import Path
 from typing import Optional
 from app.config import settings
 
-# Try importing PyG; fall back gracefully
-try:
-    from torch_geometric.nn import Node2Vec as PyGNode2Vec
-    from torch_geometric.utils import from_networkx
-    PYG_AVAILABLE = True
-except ImportError:
-    PYG_AVAILABLE = False
-    print("⚠ PyTorch Geometric not available. Using fallback embeddings.")
+torch = None
+PyGNode2Vec = None
+
+
+def _pyg_available() -> bool:
+    """Import torch + PyG on first use; False if either is unusable here."""
+    global torch, PyGNode2Vec
+    if settings.LIGHT_MODE:
+        return False
+    if PyGNode2Vec is not None:
+        return True
+    try:
+        import torch as _torch
+        from torch_geometric.nn import Node2Vec as _Node2Vec
+        torch, PyGNode2Vec = _torch, _Node2Vec
+        return True
+    except Exception as e:
+        print(f"⚠ PyTorch Geometric not available ({e}). Using structural embeddings.")
+        return False
 
 
 class GraphEmbedder:
@@ -31,7 +46,7 @@ class GraphEmbedder:
         self.embedding_dim = embedding_dim or settings.N2V_EMBEDDING_DIM
         self.embeddings: dict[str, np.ndarray] = {}
         self.model = None
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = None
 
     def fit(self, G: nx.Graph) -> dict[str, np.ndarray]:
         """
@@ -42,8 +57,9 @@ class GraphEmbedder:
         if G.number_of_nodes() == 0:
             return {}
 
-        if PYG_AVAILABLE:
+        if _pyg_available():
             try:
+                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 return self._fit_pyg(G)
             except Exception as e:
                 print(f"  PyG Node2Vec fallback: {e}")

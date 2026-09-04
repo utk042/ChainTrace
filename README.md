@@ -11,32 +11,71 @@
 
 ChainTrace Forensics is a complete offline system that ingests bulk Bitcoin transaction/network metadata (CSV/JSON/XML), correlates network-layer (IP/port/timing) observations with blockchain-layer (wallet/TXID/amount) data, and applies AI/ML to detect anomalies, cluster entities, and generate prioritized, explainable investigative leads.
 
-## 📚 Documentation & Master Presentation
-
-Comprehensive materials for understanding, demonstrating, and defending the project:
-- **[Interactive Master Presentation (PPT Deck)](docs/presentation.html)**: 22-slide animated presentation deck viewable in any browser with keyboard navigation (`ArrowRight`/`Space`), fullscreen mode (`F`), and print-to-PDF support (`Cmd+P`). Clone the repo and open the file locally (GitHub doesn't render raw HTML inline).
-- **[Presentation Script & Slide Notes](docs/PRESENTATION.md)**: Slide-by-slide speech cues, jury defense strategies, and slide content.
-- **[Master Technical Workbook](docs/WORKBOOK.md)**: 40+ page in-depth reference handbook explaining the mathematics (Autoencoder, Louvain, Node2Vec, SHAP), Bitcoin UTXO forensics, system architecture, database schema, and jury Q&A defense.
-
-
 ## 🏗 Architecture
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Storage** | DuckDB (embedded OLAP) | Analytical queries, no server needed |
-| **Validation** | Pydantic v2 | Strict schema validation for ingested data |
-| **GeoIP** | MaxMind GeoLite2 | Offline IP → Country/ASN enrichment |
-| **Graph** | NetworkX + Louvain | Entity graph construction + common-input-ownership wallet clustering |
-| **Pattern Detection** | Custom structural detectors | Peeling-chain, CoinJoin-like mixing, fan-in/fan-out consolidation hubs |
-| **Risk Propagation** | BFS + hop-decay | Spreads risk from operator-maintained seed/watchlist wallets |
-| **ML** | PyTorch Autoencoder | Unsupervised anomaly detection (reconstruction error) |
-| **Embeddings** | Node2Vec (PyG) | 64-dim graph embeddings — refines wallet clusters and powers similar-wallet lookup |
-| **Explainability** | SHAP KernelExplainer | Per-feature attribution for each alert |
-| **Real Data** | httpx + Blockstream Esplora API | Optional live fetch of real, verifiable on-chain transactions |
-| **API** | FastAPI | REST endpoints serving all data |
-| **Frontend** | React + Vite | Dark forensic dashboard |
-| **Visualization** | Sigma.js + ECharts | Interactive link-analysis graph + charts |
-| **Deployment** | Docker Compose | Single-command offline deployment |
+Every choice below is constrained by one requirement: the system has to run
+**fully offline on a single machine**, with no database server, no cloud
+service and no outbound network call. That rules out most of the obvious
+answers (Postgres, Neo4j, a hosted vector store, a CDN) and explains almost
+every row in this table.
+
+### Backend
+
+| Layer | Technology | What it does | Why this one |
+|---|---|---|---|
+| **Language** | Python 3.11 | Whole backend | The graph + ML libraries this problem needs (NetworkX, PyTorch, scikit-learn, SHAP) only coexist comfortably in Python |
+| **API** | FastAPI + Uvicorn | REST endpoints for every page | Pydantic-native, so the validation layer and the API schema are the same objects; async support for the long-running pipeline |
+| **Storage** | DuckDB | Transactions, wallet features, alerts, settings | Embedded OLAP — no server process to install or run offline, but columnar so the aggregate queries the dashboard needs stay fast. SQLite would be embedded but row-oriented; Postgres would be columnar-ish but needs a server |
+| **Validation** | Pydantic v2 | Schema enforcement on every ingested record | Evidence data has to be rejected loudly, not coerced silently. v2's Rust core also makes validating 5k+ records cheap |
+| **Parsing** | lxml, csv, json (stdlib) | CSV / JSON / XML ingestion | lxml for XML only; the stdlib covers the rest, so this is one dependency instead of three |
+| **GeoIP** | geoip2 + MaxMind GeoLite2 | IP → country / ASN enrichment | The only GeoIP option that works from a local `.mmdb` file with no API call. Degrades to a deterministic fallback when the database isn't present |
+| **Graph** | NetworkX | Entity graph (wallet / tx / IP nodes) | Pure-Python, no server, and the algorithms needed here (BFS, shortest path, ego subgraphs, connected components) are all built in. Neo4j would mean running a database |
+| **Clustering** | python-louvain | Common-input-ownership wallet clustering | Standard Louvain implementation that operates directly on a NetworkX graph |
+| **Pattern detection** | Custom SQL + graph traversal | Peeling chains, CoinJoin-like mixing, consolidation hubs | These are structural definitions, not learned ones — writing them explicitly makes them auditable and gives an investigator a reason, not a score |
+| **Risk propagation** | BFS + exponential hop decay | Spreads risk from watchlisted wallets | Deterministic and explainable: "3 hops from a known-illicit address" is defensible in a way a model output is not |
+| **Live data** | httpx + Blockstream Esplora | Optional fetch of real on-chain transactions | Free, no API key, and every txid it returns is independently verifiable on any block explorer |
+
+### Analysis backends — two profiles
+
+The same pipeline runs under either profile; only the models swap. Selected
+automatically by `CT_LIGHT_MODE` or by whether torch is importable.
+
+| Step | Full profile | Light profile | Why two |
+|---|---|---|---|
+| **Anomaly detection** | PyTorch autoencoder (16→32→16→8→…) | PCA linear autoencoder (NumPy + scikit-learn) | `import torch` alone reserves ~250 MB. On a 512 MB host the process is OOM-killed before scoring a single wallet. PCA is the same method minus the non-linearity: same reconstruction-error semantics, same percentile threshold, same per-feature error vector |
+| **Embeddings** | Node2Vec (PyTorch Geometric) | Structural (degree, neighbour degree, clustering coefficient) | Random-walk training is the pipeline's heaviest step. The fallback is weaker but keeps the similar-wallets lookup working instead of failing the run |
+| **Explainability** | SHAP KernelExplainer | Per-feature reconstruction error | KernelExplainer re-evaluates the model over thousands of masked coalitions per wallet — unaffordable in 512 MB. The fallback is coarser attribution over the same quantity |
+| **Install size** | ~2.5 GB | ~120 MB | |
+| **Peak RSS (5k tx)** | ~1.2 GB | ~450 MB | |
+
+Ingestion, the entity graph, Louvain clustering, all structural detectors,
+risk propagation and the entire API surface are **identical** in both — none
+of them ever depended on torch. The active profile is reported in the status
+bar and in Settings → System, so nobody has to guess which model produced a
+score.
+
+### Frontend
+
+| Layer | Technology | What it does | Why this one |
+|---|---|---|---|
+| **Framework** | React 19 | All seven pages | Team familiarity; the graph explorer's state (selection, filters, path, expansions) is genuinely complex enough to want a component model |
+| **Build** | Vite 6 | Dev server, bundling, code-splitting | Fast HMR, and its `manualChunks` / `inlineDynamicImports` control is what makes both the code-split build and the single-file build possible from one config |
+| **Routing** | React Router 7 | Client-side routes | `BrowserRouter` normally, `HashRouter` in the standalone build (no server to map paths onto `index.html`) |
+| **Graph** | Sigma.js 3 + Graphology | WebGL link-analysis canvas | Canvas/SVG renderers stall in the low thousands of nodes; Sigma is WebGL and handles 1,500+ smoothly. Graphology is its data model and gives the shortest-path and traversal primitives |
+| **Layout** | graphology-layout-forceatlas2 | In-browser "Re-layout" | Lets an investigator untangle the current view without a server round-trip |
+| **Charts** | ECharts | Timeline and distribution | Canvas-rendered, so it stays smooth with dense time series; lazily loaded so only the Dashboard pays its 1.1 MB |
+| **HTTP** | Axios | API client | Its custom-adapter hook is what makes offline snapshot mode a ~200-line file instead of a rewrite of every call site |
+| **Fonts** | IBM Plex Sans / Mono, self-hosted | Typography | Self-hosted from `public/fonts` (116 KB). A Google Fonts `@import` blocks first paint on an air-gapped machine and leaks every page load on a connected one |
+| **Styling** | Hand-written CSS custom properties | Design system | ~250 tokens in one file. No Tailwind/CSS-in-JS: nothing to configure, nothing extra in the bundle, and the palette can be re-themed by editing one block |
+
+### Deployment
+
+| Concern | Technology | Why |
+|---|---|---|
+| **Offline / on-prem** | Docker Compose | One command, two containers, nginx proxying `/api` — no API URL to configure |
+| **Cloud backend** | Docker on Render | `DEPS=light` build arg + `CT_LIGHT_MODE` so it fits a 512 MB free instance |
+| **Cloud frontend** | Static build on Vercel | `VITE_API_URL` at build time; the SPA rewrite deliberately excludes `/api` so a missing backend URL fails loudly instead of returning HTML to every API call |
+| **Single file** | `npm run build:standalone` | Inlines scripts, styles, fonts and a pipeline snapshot into one HTML file that runs from `file://` with no server, network or backend |
 
 ## 🚀 Quick Start
 
@@ -45,7 +84,7 @@ Comprehensive materials for understanding, demonstrating, and defending the proj
 ```bash
 # 1. Backend
 cd backend
-pip install -r requirements.txt
+pip install -r requirements.txt   # or requirements-light.txt on a small machine
 python scripts/generate_synthetic.py  # Generate 5K test transactions
 uvicorn app.main:app --reload --port 8000
 
@@ -69,7 +108,85 @@ One honest limitation: real on-chain data has no network-layer (source/destinati
 docker-compose up --build
 ```
 
-Access at http://localhost:3000
+Access at http://localhost:3000. The Compose frontend proxies `/api` to the
+backend container, so no API URL configuration is needed.
+
+### Does it work offline?
+
+Yes — completely, on localhost with the network unplugged. The frontend makes
+no third-party requests at all: IBM Plex is served from `frontend/public/fonts`
+rather than Google Fonts, and there are no CDN scripts, analytics or remote
+stylesheets anywhere in the build. The backend is DuckDB-embedded with no
+external services. GeoIP enrichment uses a local MaxMind database if one is
+present and degrades to a deterministic fallback if not.
+
+The only feature that needs a network is **Ingest → Fetch Real Blockchain
+Data**, which calls Blockstream's public API by definition. It fails with a
+clear message on an air-gapped machine; fetch the data on a connected machine
+and upload the file instead.
+
+If you want to show the interface with no backend running at all — a hosted
+preview link, a laptop on a plane, a demo before the pipeline has been run —
+turn on **Settings → Offline Snapshot Mode**. It serves a stored run of the
+full pipeline (4,970 synthetic transactions: real scores, alerts, clusters and
+graph structure) from data bundled into the build. It is labelled as a
+snapshot throughout, and ingestion and settings writes are refused rather than
+faked.
+
+For a copy you can hand to someone as a single attachment:
+
+```bash
+cd frontend && npm run build:standalone
+# -> dist/chaintrace-standalone.html  (~3.4 MB, one file)
+```
+
+Scripts, styles, fonts and the snapshot are all embedded, routing goes through
+the hash and snapshot mode is on, so the file opens straight from `file://`
+with no server, no install and no network. (The PNG/JSON export buttons need a
+real browser context; everything else works.)
+
+### Cloud deployment (Vercel + Render)
+
+Two things have to be right or the frontend comes up with no data:
+
+**1. The frontend needs to know where the backend is.** Vite inlines
+`VITE_API_URL` at *build* time, so set it in the Vercel project settings and
+redeploy — changing it does not affect an existing deployment. See
+`frontend/.env.example`. A build with it unset now says so in a banner instead
+of rendering empty pages, and Settings → Backend API Connection can point a
+running build at a backend without rebuilding.
+
+**2. The backend needs to fit its instance.** Render's free tier gives 512 MB
+of RAM, and the full dependency set cannot run in that — `import torch` alone
+reserves ~250 MB and Node2Vec training peaks far past the rest, so the
+container is OOM-killed mid-pipeline. `render.yaml` therefore builds with
+`DEPS=light` and runs with `CT_LIGHT_MODE=true`:
+
+| | Full profile | Light profile |
+|---|---|---|
+| Anomaly detection | PyTorch autoencoder (non-linear) | PCA linear autoencoder |
+| Embeddings | Node2Vec (PyTorch Geometric) | Structural (degree / clustering) |
+| Explainability | SHAP KernelExplainer | Per-feature reconstruction error |
+| Installed size | ~2.5 GB | ~120 MB |
+| Peak RSS, 5k transactions | ~1.2 GB | ~450 MB |
+| Needs | 2 GB+ instance | 512 MB instance |
+
+Ingestion, the entity graph, Louvain clustering, every structural detector
+(peel chains, CoinJoin, consolidation hubs), risk propagation and the entire
+API surface are identical in both — none of them ever depended on torch. The
+active profile is shown in the status bar and in Settings → System, so nobody
+has to guess which model produced a score.
+
+Light mode also engages automatically if torch simply isn't installed, so
+`pip install -r backend/requirements-light.txt` is a complete, working install
+on its own.
+
+**A note on free-tier storage:** Render's free instances have no persistent
+disk. The filesystem is reset on every deploy and every wake from sleep, so an
+ingested dataset does not survive a cold start — the app detects the empty
+database and says so rather than showing blank pages. Attach a disk at
+`/app/data` on a paid plan (commented into `render.yaml`) to keep data between
+restarts.
 
 ## 📊 ML Pipeline
 
@@ -101,11 +218,30 @@ All five forensic thresholds on the Settings page (Mixer Confidence, Darknet Pro
 
 - **Dashboard** — KPIs, activity timeline, risk distribution, top alerts
 - **Alerts** — Filterable alert table with SHAP feature bars and per-detector labels (Peel-Chain, CoinJoin, Mixer-Hub, Risk-Propagation, Autoencoder)
-- **Graph Explorer** — Interactive Sigma.js graph with node search
+- **Graph Explorer** — Interactive Sigma.js link chart: ranked entity search, node/risk filtering, incremental expansion, shortest-path tracing between two entities, a full entity inspector, client-side force re-layout, PNG/JSON export and keyboard shortcuts (see below)
 - **Wallets** — Wallet browser with detail panel: pattern badges (peeling chain / mixer / seed proximity), a risk-score gauge, and a Node2Vec-powered "Similar Wallets" panel
 - **Transactions** — Transaction browser with I/O flow
 - **Ingest** — File upload, synthetic sample generation, or a live fetch of real Blockstream data, then pipeline execution
 - **Settings** — Forensic threshold configuration (all five thresholds are live) + a Seed Watchlist tab for maintaining known-illicit wallets that risk propagation spreads from
+
+### Graph Explorer
+
+| Action | How |
+|---|---|
+| Find an entity | Type into the search box (`/`). Results are ranked exact → prefix → substring, then by risk and connectivity. |
+| Inspect | Click any node. The camera flies to it, its neighbourhood is highlighted and everything else dims; the inspector shows behavioural features, structural findings, alerts and top counterparties. |
+| Grow the picture | **Expand** (`E`) merges the node's neighbours into the canvas you already have, rather than replacing it. |
+| Trace a connection | **Trace** on any node, then paste a second identifier: the shortest path between the two is computed and highlighted hop by hop. |
+| Focus the view | **Fit** (`F`) frames the whole graph; **Centre** (`C`) re-centres the selection; **Reset** (`R`) restores the original graph, clears filters and selection, and re-frames. |
+| Reduce clutter | **Filters** toggles node types and sets a minimum anomaly score. Applied instantly client-side — no refetch. |
+| Untangle | **Re-layout** (`L`) runs ForceAtlas2 over the current view in the browser. The layout dropdown re-runs a server-side layout instead. |
+| Take it with you | Export the view as PNG or JSON. |
+
+Node size means something: it scales with the square root of a node's degree
+(so area, not radius, tracks connectivity), saturates at 40 links so one hub
+cannot flatten everything else to dots, and grows up to 25% more for a
+risk-scored wallet. Wallets get the widest size range, transactions and IPs
+stay small so they read as connective tissue.
 
 ## 📁 Project Structure
 
@@ -126,15 +262,26 @@ Prototype/
 │   │   │   ├── clustering.py        # Louvain + Node2Vec-based cluster refinement
 │   │   │   ├── patterns.py          # Peeling-chain / CoinJoin / consolidation-hub detectors
 │   │   │   └── risk_propagation.py  # BFS risk propagation from seed wallets
-│   │   ├── ml/                  # Autoencoder + Node2Vec + SHAP
+│   │   ├── ml/
+│   │   │   ├── autoencoder.py    # Picks the backend below for this deployment
+│   │   │   ├── torch_backend.py  # PyTorch autoencoder (full profile)
+│   │   │   ├── light.py          # PCA linear autoencoder (light profile)
+│   │   │   ├── embeddings.py     # Node2Vec, with a structural fallback
+│   │   │   └── explainer.py      # SHAP, with a reconstruction-error fallback
 │   │   └── routers/             # FastAPI endpoints
+│   ├── requirements.txt         # Full dependency set
+│   ├── requirements-light.txt   # Without torch / PyG / SHAP (~120 MB)
 │   └── scripts/
 │       └── generate_synthetic.py
 └── frontend/
+    ├── public/fonts/         # Self-hosted IBM Plex — no Google Fonts request
     └── src/
         ├── pages/            # 7 pages
-        ├── components/       # Reusable UI
-        └── services/         # API client
+        ├── components/
+        │   ├── Graph/        # Sigma canvas + node inspector
+        │   └── Layout/       # Sidebar, top bar, status bar, connection banner
+        ├── demo/             # Bundled pipeline snapshot for offline mode
+        └── services/         # API client + offline snapshot adapter
 ```
 
 ## 📝 License

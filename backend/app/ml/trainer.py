@@ -99,8 +99,13 @@ def run_full_pipeline() -> dict:
     """
     global _entity_graph, _anomaly_detector, _graph_embedder, _explainer, _clusters, _wallet_features
 
+    from app.ml.autoencoder import backend_name, is_light_mode
+
     summary = {
         "started_at": datetime.utcnow().isoformat(),
+        # Which analysis backends actually ran.
+        "ml_backend": backend_name(),
+        "light_mode": is_light_mode(),
         "steps": {},
     }
     eff = get_effective_settings()

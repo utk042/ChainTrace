@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import settings
-from app.database import init_database
+from app.database import init_database, get_db_readonly
 from app.routers import dashboard, alerts, graph_explorer, wallets, transactions, ingest, settings as settings_router
 
 
@@ -16,6 +16,9 @@ async def lifespan(app: FastAPI):
     print("\n🔗 ChainTrace Forensics — Starting...")
     init_database()
     print("✓ Database initialized")
+
+    from app.ml.autoencoder import backend_name, backend_reason
+    print(f"  ML backend: {backend_name()} ({backend_reason()})")
 
     # Try loading existing models
     try:
@@ -32,6 +35,11 @@ async def lifespan(app: FastAPI):
             trainer._entity_graph = build_entity_graph()
             from app.graph.clustering import cluster_wallets
             trainer._clusters = cluster_wallets(trainer._entity_graph)
+            # Without this the rebuilt graph carries no anomaly scores or
+            # risk tiers, only topology.
+            from app.graph.builder import apply_scores_from_db
+            scored = apply_scores_from_db(trainer._entity_graph)
+            print(f"  Restored scores for {scored} wallet(s)")
 
             # Try loading pre-trained models
             from app.ml.autoencoder import AnomalyDetector
@@ -93,4 +101,26 @@ def root():
 
 @app.get("/api/health")
 def health():
-    return {"status": "healthy", "service": "ChainTrace Forensics"}
+    """
+    Liveness, plus the state the UI needs to distinguish an unreachable
+    backend from a reachable one with an empty database.
+    """
+    from app.ml.autoencoder import backend_name, backend_reason, is_light_mode
+
+    tx_count = 0
+    try:
+        with get_db_readonly() as con:
+            tx_count = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    except Exception:
+        pass
+
+    return {
+        "status": "healthy",
+        "service": "ChainTrace Forensics",
+        "version": "1.0.0",
+        "has_data": tx_count > 0,
+        "transaction_count": tx_count,
+        "light_mode": is_light_mode(),
+        "ml_backend": backend_name(),
+        "ml_backend_reason": backend_reason(),
+    }
