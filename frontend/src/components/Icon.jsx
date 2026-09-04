@@ -46,7 +46,7 @@ const PATHS = {
 
 const FILLED = new Set(['play']);
 
-export default function Icon({ name, size = 16, strokeWidth = 1.75, style, className, title }) {
+export default function Icon({ name, size = 16, strokeWidth = 1.5, style, className, title }) {
   const d = PATHS[name];
   if (!d) return null;
   const filled = FILLED.has(name);

@@ -1,9 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
 import Sidebar from './components/Layout/Sidebar';
-import TopBar from './components/Layout/TopBar';
-import StatusBar from './components/Layout/StatusBar';
 import ConnectionBanner from './components/Layout/ConnectionBanner';
+import CommandPalette from './components/CommandPalette';
 
 // Code-split so a page downloads only what it uses: ECharts (1.1 MB) is
 // needed by the Dashboard alone, Sigma by the Graph Explorer alone.
@@ -33,7 +32,6 @@ export default function App() {
       <div className="app-layout">
         <Sidebar />
         <div className="main-content">
-          <TopBar />
           <ConnectionBanner />
           <Suspense fallback={<RouteFallback />}>
             <Routes>
@@ -46,8 +44,8 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </Suspense>
-          <StatusBar />
         </div>
+        <CommandPalette />
       </div>
     </Router>
   );

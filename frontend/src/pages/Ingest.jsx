@@ -61,13 +61,13 @@ export default function Ingest() {
   const handleRunPipeline = async (filePath = null) => {
     try {
       setIsProcessing(true);
-      setPipelineStatus({ status: 'running', progress: 5, message: 'Starting pipeline execution...' });
+      setPipelineStatus({ status: 'running', progress: 5, message: 'Starting...' });
       const params = {};
       if (filePath) params.file_path = filePath;
       await runPipeline(params);
       setPolling(true);
     } catch (e) {
-      setPipelineStatus({ status: 'error', progress: 0, message: 'Pipeline launch failed: ' + (e.response?.data?.error || e.message) });
+      setPipelineStatus({ status: 'error', progress: 0, message: 'Failed to start: ' + (e.response?.data?.error || e.message) });
       setPolling(false);
       setIsProcessing(false);
     }
@@ -76,10 +76,10 @@ export default function Ingest() {
   const handleFetchReal = async () => {
     try {
       setIsProcessing(true);
-      setPipelineStatus({ status: 'running', progress: 5, message: 'Fetching real, verifiable transactions from the live Bitcoin blockchain (Blockstream API)...' });
+      setPipelineStatus({ status: 'running', progress: 5, message: 'Fetching transactions from Blockstream...' });
       const res = await fetchRealData(500, 10);
       if (res.data.error) throw new Error(res.data.error);
-      setPipelineStatus({ status: 'running', progress: 25, message: `${res.data.count} real transactions fetched. Launching ML analysis pipeline...` });
+      setPipelineStatus({ status: 'running', progress: 25, message: `${res.data.count} transactions fetched. Running analysis...` });
       await runPipeline({ file_path: res.data.csv_path });
       setPolling(true);
     } catch (e) {
@@ -92,9 +92,9 @@ export default function Ingest() {
   const handleGenerateSample = async () => {
     try {
       setIsProcessing(true);
-      setPipelineStatus({ status: 'running', progress: 10, message: 'Generating 5,000 synthetic transactions...' });
+      setPipelineStatus({ status: 'running', progress: 10, message: 'Generating 5,000 transactions...' });
       const res = await generateSampleData(5000);
-      setPipelineStatus({ status: 'running', progress: 25, message: 'Sample generated. Launching ML analysis pipeline...' });
+      setPipelineStatus({ status: 'running', progress: 25, message: 'Generated. Running analysis...' });
       await runPipeline({ file_path: res.data.csv_path });
       setPolling(true);
     } catch (e) {
@@ -112,10 +112,10 @@ export default function Ingest() {
   const progress = pipelineStatus?.progress || 0;
   const errored = pipelineStatus?.status === 'error';
   const steps = [
-    { name: 'PARSE & VALIDATE', detail: 'schema + records', min: 0, max: 20 },
-    { name: 'ENRICH', detail: 'GeoIP lookup', min: 20, max: 30 },
-    { name: 'LOAD', detail: 'DuckDB insert', min: 30, max: 40 },
-    { name: 'ML ANALYSIS', detail: 'graph · cluster · score · explain', min: 40, max: 100 },
+    { name: 'Parse', detail: 'schema and records', min: 0, max: 20 },
+    { name: 'Enrich', detail: 'GeoIP lookup', min: 20, max: 30 },
+    { name: 'Load', detail: 'DuckDB insert', min: 30, max: 40 },
+    { name: 'Analyse', detail: 'cluster, score, explain', min: 40, max: 100 },
   ].map((s, i, arr) => {
     const nextMin = arr[i + 1]?.min ?? 100;
     let status = 'pending';
@@ -129,31 +129,17 @@ export default function Ingest() {
   return (
     <div className="page-content fade-in">
       <div className="page-header">
-        <h1 className="page-title">Data Ingestion</h1>
+        <h1 className="page-title">Ingest</h1>
       </div>
 
       {pipelineStatus?.run_id && (
         <div className="run-header">
           <div className="run-header-meta">
-            <span>RUN ID <b>{pipelineStatus.run_id}</b></span>
-            {file && <span>DATASET <b>{file.name}</b></span>}
+            <span>Run <b>{pipelineStatus.run_id}</b></span>
+            {file && <span>File <b>{file.name}</b></span>}
           </div>
-          <span
-            className="topbar-status"
-            style={{
-              color: pipelineStatus.status === 'completed' ? 'var(--accent-green)'
-                : pipelineStatus.status === 'error' ? 'var(--accent-critical)' : 'var(--accent-elevated)',
-            }}
-          >
-            <span
-              className="pulse-dot"
-              style={{
-                background: pipelineStatus.status === 'completed' ? 'var(--accent-green)'
-                  : pipelineStatus.status === 'error' ? 'var(--accent-critical)' : 'var(--accent-elevated)',
-                animation: pipelineStatus.status === 'running' ? undefined : 'none',
-              }}
-            />
-            {pipelineStatus.status?.toUpperCase()}
+          <span className={`badge ${pipelineStatus.status === 'error' ? 'critical' : ''}`}>
+            {pipelineStatus.status}
           </span>
         </div>
       )}
@@ -184,10 +170,10 @@ export default function Ingest() {
       >
         <div className="dropzone-icon"><Icon name="uploadCloud" size={26} /></div>
         <div className="dropzone-text">
-          {file ? file.name : 'DRAG .CSV / .JSON / .XML BLOCKCHAIN EXPORT HERE'}
+          {file ? file.name : 'Drop a .csv, .json or .xml export'}
         </div>
         <div className="dropzone-sub">
-          {file ? `${(file.size / 1024).toFixed(1)} KB` : 'or click to browse — processed entirely offline'}
+          {file ? `${(file.size / 1024).toFixed(1)} KB` : 'or click to browse'}
         </div>
         <input
           ref={fileInputRef}
@@ -205,34 +191,34 @@ export default function Ingest() {
           disabled={!file}
           onClick={handleUpload}
         >
-          <Icon name="upload" size={13} /> Upload File
+          <Icon name="upload" size={13} /> Upload
         </button>
         <button
           className="btn btn-primary"
           disabled={!uploadStatus?.path}
           onClick={() => handleRunPipeline(uploadStatus?.path)}
         >
-          <Icon name="play" size={13} /> Run Pipeline
+          <Icon name="play" size={13} /> Run
         </button>
         <button
           className="btn btn-outline"
           disabled={isProcessing}
           onClick={handleFetchReal}
-          title="Pulls real, verifiable transactions from the live Bitcoin blockchain via Blockstream's public API. Requires internet access; network-layer (IP/port) fields are left blank since no public source for that exists."
+          title="Pulls transactions from Blockstream's public API. Needs internet access; IP and port fields stay blank, since no public source for them exists."
         >
           {isProcessing
-            ? <><span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> Processing Pipeline...</>
-            : <><Icon name="globe" size={13} /> Fetch Real Blockchain Data &amp; Run</>}
+            ? <><span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> Running...</>
+            : <><Icon name="globe" size={13} /> Fetch from Blockstream</>}
         </button>
         <button
           className="btn btn-outline"
           disabled={isProcessing}
           onClick={handleGenerateSample}
-          title="Generates a synthetic demo dataset with fabricated wallets, IPs, and injected anomaly patterns — for testing the pipeline without real data."
+          title="Synthetic wallets, IPs and injected anomaly patterns, for testing the pipeline without real data."
         >
           {isProcessing
-            ? <><span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> Processing Pipeline...</>
-            : <><Icon name="sparkles" size={13} /> Generate Sample &amp; Run</>}
+            ? <><span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> Running...</>
+            : <><Icon name="sparkles" size={13} /> Generate sample</>}
         </button>
       </div>
 
@@ -250,9 +236,9 @@ export default function Ingest() {
       {pipelineStatus && (
         <div className="pipeline-progress">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>Pipeline Execution</h3>
+            <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>Pipeline</h3>
             <span className={`badge ${pipelineStatus.status === 'completed' ? 'success' : pipelineStatus.status === 'error' ? 'critical' : 'info'}`}>
-              {pipelineStatus.status?.toUpperCase()}
+              {pipelineStatus.status}
             </span>
           </div>
 

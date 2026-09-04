@@ -8,8 +8,8 @@ import { useBackendStatus } from '../hooks/useBackendStatus';
 import Icon from '../components/Icon';
 
 const settingsSections = [
-  { id: 'thresholds', label: 'Forensic Thresholds' },
-  { id: 'watchlist', label: 'Seed Watchlist' },
+  { id: 'thresholds', label: 'Thresholds' },
+  { id: 'watchlist', label: 'Watchlist' },
   { id: 'system', label: 'System' },
 ];
 
@@ -99,11 +99,11 @@ export default function Settings() {
   return (
     <div className="page-content fade-in">
       <div className="page-header">
-        <h1 className="page-title">System Configuration</h1>
+        <h1 className="page-title">Settings</h1>
         <div className="page-actions">
-          <button className="btn btn-outline" onClick={handleReset}>Discard Changes</button>
+          <button className="btn btn-outline" onClick={handleReset}>Discard</button>
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving...' : 'Deploy Config'}
+            {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
@@ -131,15 +131,12 @@ export default function Settings() {
         <div>
           {activeSection === 'thresholds' && (
             <div className="settings-section">
-              <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 4 }}>Forensic Thresholds</h2>
-              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-xl)' }}>
-                Configure baseline confidence cut-offs for heuristic analysis algorithms.
-              </p>
+              <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, marginBottom: 'var(--space-lg)' }}>Thresholds</h2>
 
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <h3>Mixer Identification Confidence</h3>
-                  <p>Minimum heuristic score to flag a cluster as a mixing service.</p>
+                  <h3>Mixer confidence</h3>
+                  <p>Minimum score to flag a cluster as a mixing service.</p>
                 </div>
                 <div className="slider-control" style={{ width: 200 }}>
                   <input
@@ -159,8 +156,8 @@ export default function Settings() {
 
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <h3>Darknet Market Proximity</h3>
-                  <p>Maximum hop distance to consider a wallet "exposed" to known DNM entities.</p>
+                  <h3>Watchlist proximity</h3>
+                  <p>Hops from a watchlisted wallet that still carry risk.</p>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
                   <button className="btn btn-outline" style={{ padding: '4px 8px', minWidth: 0 }}
@@ -183,8 +180,8 @@ export default function Settings() {
 
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <h3>Strict IP Geolocation Mapping</h3>
-                  <p>Require VPN/Proxy exit node cross-referencing before attributing location.</p>
+                  <h3>Strict IP geolocation</h3>
+                  <p>Cross-reference VPN and proxy exit nodes before attributing a location.</p>
                 </div>
                 <div
                   className={`toggle-switch ${settings.geo_ip_strict === 'true' ? 'active' : ''}`}
@@ -194,8 +191,8 @@ export default function Settings() {
 
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <h3>Velocity Spike Threshold</h3>
-                  <p>Minimum transactions per hour to flag as a velocity spike.</p>
+                  <h3>Velocity spike</h3>
+                  <p>Transactions per hour that count as a spike.</p>
                 </div>
                 <div className="slider-control" style={{ width: 200 }}>
                   <input
@@ -215,8 +212,8 @@ export default function Settings() {
 
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <h3>Anomaly Percentile</h3>
-                  <p>Reconstruction error percentile threshold for flagging anomalies.</p>
+                  <h3>Anomaly percentile</h3>
+                  <p>Reconstruction error percentile above which a wallet is flagged.</p>
                 </div>
                 <div className="slider-control" style={{ width: 200 }}>
                   <input
@@ -238,24 +235,21 @@ export default function Settings() {
 
           {activeSection === 'watchlist' && (
             <div className="settings-section">
-              <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 4 }}>Seed / Watchlist Wallets</h2>
+              <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, marginBottom: 4 }}>Watchlist</h2>
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-xl)' }}>
-                Known-illicit addresses risk is propagated from (Risk Scoring — Section 4). ChainTrace never
-                infers or fabricates this list; an investigator maintains it, e.g. from a sanctions list, a prior
-                case, or an exchange freeze notice. Every wallet within the "Darknet Market Proximity" hop count of
-                one of these gets a proximity-decayed risk boost.
+                Addresses risk propagates from. You maintain this list; nothing is added automatically.
               </p>
 
               <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-lg)', flexWrap: 'wrap' }}>
                 <input
-                  type="text" placeholder="Wallet address..."
+                  type="text" placeholder="Address"
                   value={newSeedAddress} onChange={e => setNewSeedAddress(e.target.value)}
                   style={{ flex: '1 1 260px', background: 'var(--bg-input)', border: '1px solid var(--border-primary)',
                     color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)',
                     padding: '8px 12px', borderRadius: 'var(--radius-md)' }}
                 />
                 <input
-                  type="text" placeholder="Label (optional)..."
+                  type="text" placeholder="Label"
                   value={newSeedLabel} onChange={e => setNewSeedLabel(e.target.value)}
                   style={{ flex: '1 1 180px', background: 'var(--bg-input)', border: '1px solid var(--border-primary)',
                     color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)',
@@ -268,8 +262,7 @@ export default function Settings() {
 
               {seedWallets.length === 0 ? (
                 <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
-                  No seed wallets yet. Add one above, or generate the synthetic demo dataset (Ingest page), which
-                  auto-registers its darknet-adjacent wallets here.
+                  Empty.
                 </p>
               ) : (
                 <div className="table-responsive">
@@ -307,16 +300,16 @@ export default function Settings() {
           {activeSection === 'system' && (
             <div>
               <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
-                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-md)' }}>System Information</h2>
+                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, marginBottom: 'var(--space-md)' }}>System</h2>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)', fontSize: 'var(--text-sm)' }}>
                   {[
                     ['Version', health?.version || '1.0.0'],
                     ['Database', 'DuckDB (embedded)'],
-                    ['Connection', demo ? 'Offline snapshot'
+                    ['Connection', demo ? 'Snapshot'
                       : status === 'down' ? 'Unreachable'
                       : status === 'empty' ? 'Connected — no data'
                       : 'Connected'],
-                    ['Transactions loaded', health?.transaction_count?.toLocaleString() ?? '—'],
+                    ['Transactions', health?.transaction_count?.toLocaleString() ?? '—'],
                     // Read from the backend rather than hardcoded: on a
                     // light-mode host neither the neural autoencoder nor
                     // Node2Vec nor SHAP is running, and this panel is where an
@@ -327,7 +320,7 @@ export default function Settings() {
                       : health ? 'Node2Vec (PyG)' : '—'],
                     ['Explainability', health?.light_mode ? 'Per-feature reconstruction error'
                       : health ? 'SHAP KernelExplainer' : '—'],
-                    ['Deployment profile', health?.light_mode ? 'Light (low memory)'
+                    ['Profile', health?.light_mode ? 'Light (low memory)'
                       : health ? 'Full' : '—'],
                   ].map(([k, v]) => (
                     <div key={k} style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
@@ -339,9 +332,9 @@ export default function Settings() {
               </div>
 
               <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
-                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-md)' }}>Backend API Connection</h2>
+                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, marginBottom: 'var(--space-md)' }}>Backend</h2>
                 <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-md)' }}>
-                  Active backend API endpoint (e.g. your Render web service URL). By default, this uses the <code>VITE_API_URL</code> environment variable. You can also override it here directly in your browser.
+                  Defaults to <code>VITE_API_URL</code>. An address set here overrides it in this browser.
                 </p>
                 <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
                   <input
@@ -354,50 +347,42 @@ export default function Settings() {
                       padding: '8px 12px', borderRadius: 'var(--radius-md)' }}
                   />
                   <button className="btn btn-primary" onClick={handleSaveApiUrl}>
-                    Save Backend URL
+                    Save
                   </button>
                   {apiUrl && (
                     <button className="btn btn-secondary" onClick={() => { setApiUrl(''); setApiBaseUrl(''); window.location.reload(); }}>
-                      Reset to Default
+                      Reset
                     </button>
                   )}
                 </div>
               </div>
 
               <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
-                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-md)' }}>Offline Snapshot Mode</h2>
+                <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, marginBottom: 'var(--space-md)' }}>Snapshot</h2>
                 <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-md)', lineHeight: 1.6 }}>
-                  Serves a stored run of the analysis pipeline (4,970 synthetic
-                  transactions) from data bundled into this build, so the whole
-                  interface is usable with no backend — on a hosted preview link,
-                  or on a machine with no network at all. Scores, alerts, clusters
-                  and graph structure are genuine pipeline output; nothing
-                  recomputes, and ingestion and settings changes are refused
-                  rather than faked.
+                  A stored pipeline run bundled into this build, so the interface
+                  works with no backend. Nothing recomputes; ingestion and settings
+                  changes are refused rather than faked.
                 </p>
                 <div className="settings-row" style={{ borderBottom: 'none' }}>
                   <div className="settings-row-info">
-                    <h3 style={{ color: 'var(--text-primary)' }}>
-                      {demo ? 'Snapshot mode is on' : 'Snapshot mode is off'}
-                    </h3>
-                    <p>{demo
-                      ? 'All pages are reading from the bundled snapshot.'
-                      : 'All pages are reading from the configured backend.'}</p>
+                    <h3 style={{ color: 'var(--text-primary)' }}>{demo ? 'On' : 'Off'}</h3>
+                    <p>{demo ? 'Reading the bundled snapshot.' : 'Reading the configured backend.'}</p>
                   </div>
                   <button className={demo ? 'btn btn-secondary' : 'btn btn-outline'} onClick={toggleDemo}>
-                    {demo ? 'Switch to live backend' : 'Use offline snapshot'}
+                    {demo ? 'Use backend' : 'Use snapshot'}
                   </button>
                 </div>
               </div>
 
               <div className="danger-zone">
-                <h3 style={{ marginBottom: 'var(--space-lg)' }}><Icon name="alertTriangle" size={13} /> System Reset</h3>
+                <h3 style={{ marginBottom: 'var(--space-lg)' }}>Destructive</h3>
                 <div className="settings-row" style={{ borderBottom: 'none' }}>
                   <div className="settings-row-info">
-                    <h3 style={{ color: 'var(--text-primary)' }}>Purge Local Cache</h3>
-                    <p>Clear all locally cached graph nodes and temporary analysis files.</p>
+                    <h3 style={{ color: 'var(--text-primary)' }}>Purge cache</h3>
+                    <p>Deletes cached graph nodes and temporary analysis files.</p>
                   </div>
-                  <button className="btn btn-danger" onClick={handlePurge}>Execute Purge</button>
+                  <button className="btn btn-danger" onClick={handlePurge}>Purge</button>
                 </div>
               </div>
             </div>

@@ -44,14 +44,14 @@ export default function Dashboard() {
         type: 'bar',
         data: timeline.map(t => t.count),
         // Volume is the baseline; the anomaly series on top is the signal.
-        itemStyle: { color: 'rgba(139, 124, 246, 0.38)' },
+        itemStyle: { color: '#3D3D3D' },
         barWidth: '58%',
       },
       {
         name: 'Anomalies',
         type: 'bar',
         data: timeline.map(t => t.anomaly_count),
-        itemStyle: { color: RISK_COLORS.Critical },
+        itemStyle: { color: '#FFFFFF' },
         barWidth: '58%',
       },
     ],
@@ -67,71 +67,65 @@ export default function Dashboard() {
       {/* KPI strip */}
       <div className="stats-grid">
         <div className="stat-card">
-          <span className="stat-label">Total Transactions</span>
+          <span className="stat-label">Transactions</span>
           <span className="stat-value">{stats?.total_transactions?.toLocaleString() || '0'}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">Unique Wallets</span>
+          <span className="stat-label">Wallets</span>
           <span className="stat-value">{stats?.total_wallets?.toLocaleString() || '0'}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">Unique IPs</span>
+          <span className="stat-label">IP addresses</span>
           <span className="stat-value">{stats?.total_ips?.toLocaleString() || '0'}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">Active Alerts</span>
-          <span className="stat-value" style={{ color: 'var(--accent-critical)' }}>
-            {stats?.total_alerts?.toLocaleString() || '0'}
-          </span>
+          <span className="stat-label">Alerts</span>
+          <span className="stat-value">{stats?.total_alerts?.toLocaleString() || '0'}</span>
           <span className="stat-sub">
-            {stats?.critical_alerts || 0} CRIT · {stats?.high_alerts || 0} HIGH · {stats?.elevated_alerts || 0} ELEV
+            {stats?.critical_alerts || 0} critical · {stats?.high_alerts || 0} high · {stats?.elevated_alerts || 0} elevated
           </span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">Clusters Detected</span>
+          <span className="stat-label">Clusters</span>
           <span className="stat-value">{stats?.clusters_detected?.toLocaleString() || '0'}</span>
         </div>
       </div>
 
-      {/* Charts Row */}
-      <div className="two-column" style={{ marginBottom: 'var(--space-xl)' }}>
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Transaction Volume — Timeline</span>
-            <span className="card-meta">anomalies highlighted</span>
-          </div>
-          <ReactECharts option={timelineOption} style={{ height: 220 }} notMerge />
+      {/* Wallets by risk tier — one bar, read left to right */}
+      <div className="risk-strip">
+        <div className="risk-bar">
+          {orderedRisk.map(r => (
+            <div
+              key={r.tier}
+              className="risk-bar-seg"
+              style={{ width: `${(r.count / riskTotal) * 100}%`, background: RISK_COLORS[r.tier] }}
+              title={`${r.tier}: ${r.count}`}
+            />
+          ))}
         </div>
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Risk Distribution — Active Wallets</span>
-          </div>
-          <div className="risk-bar" style={{ marginTop: 'var(--space-lg)' }}>
-            {orderedRisk.map(r => (
-              <div
-                key={r.tier}
-                className="risk-bar-seg"
-                style={{ width: `${(r.count / riskTotal) * 100}%`, background: RISK_COLORS[r.tier] }}
-                title={`${r.tier}: ${r.count}`}
-              />
-            ))}
-          </div>
-          <div className="risk-legend">
-            {orderedRisk.map(r => (
-              <div className="risk-legend-item" key={r.tier}>
-                <span className="risk-legend-swatch" style={{ background: RISK_COLORS[r.tier] }} />
-                {r.tier.toUpperCase()} <span style={{ color: 'var(--text-primary)' }}>{((r.count / riskTotal) * 100).toFixed(0)}%</span>
-              </div>
-            ))}
-          </div>
+        <div className="risk-legend">
+          {orderedRisk.map(r => (
+            <div className="risk-legend-item" key={r.tier}>
+              <span className="risk-legend-swatch" style={{ background: RISK_COLORS[r.tier] }} />
+              {r.tier} <span style={{ color: 'var(--text-primary)' }}>{r.count.toLocaleString()}</span>
+            </div>
+          ))}
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 'var(--space-xl)' }}>
+        <div className="card-header">
+          <span className="card-title">Transaction volume</span>
+          <span className="card-meta">anomalies in white</span>
+        </div>
+        <ReactECharts option={timelineOption} style={{ height: 260 }} notMerge />
       </div>
 
       {/* Top Alerts */}
       <div className="card">
         <div className="card-header">
-          <span className="card-title">Prioritized Alerts</span>
-          <span className="card-meta">{stats?.total_alerts || 0} pending</span>
+          <span className="card-title">Highest confidence alerts</span>
+          <span className="card-meta">{stats?.total_alerts || 0} total</span>
         </div>
         <div className="alert-grid">
           {topAlerts.map((alert) => (
@@ -143,7 +137,7 @@ export default function Dashboard() {
                       ? `${alert.entity_id.slice(0, 10)}...${alert.entity_id.slice(-8)}`
                       : alert.entity_id}
                   </div>
-                  <div className="alert-entity-type">ENTITY: {alert.entity_type?.toUpperCase()}</div>
+                  <div className="alert-entity-type">{alert.entity_type}</div>
                 </div>
                 <div className={`alert-confidence ${alert.risk_tier?.toLowerCase()}`}>
                   {alert.confidence?.toFixed(1)}%
@@ -152,8 +146,8 @@ export default function Dashboard() {
               <div className="alert-description">{alert.description}</div>
               {alert.shap_values && Array.isArray(alert.shap_values) && (
                 <div className="shap-bars">
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: 4 }}>
-                    SHAP FEATURE CONTRIBUTION
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginBottom: 4 }}>
+                    Feature contributions
                   </div>
                   {alert.shap_values.slice(0, 3).map((sv, i) => {
                     const maxContrib = Math.max(...alert.shap_values.map(s => Math.abs(s.contribution || 0)), 0.01);

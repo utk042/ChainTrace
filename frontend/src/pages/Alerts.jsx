@@ -39,7 +39,7 @@ export default function Alerts() {
   return (
     <div className="page-content fade-in">
       <div className="page-header">
-        <h1 className="page-title">Active Alerts <span className="count">{total.toLocaleString()}</span></h1>
+        <h1 className="page-title">Alerts <span className="count">{total.toLocaleString()}</span></h1>
         <div className="page-actions">
           <button className="btn btn-outline" onClick={handleExport}><Icon name="download" size={13} /> Export CSV</button>
         </div>
@@ -47,16 +47,16 @@ export default function Alerts() {
 
       {/* Filters */}
       <div className="filter-panel">
-        <div className="filter-panel-title">Filters & Parameters</div>
+        
         <div style={{ display: 'flex', gap: 'var(--space-xl)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div>
             <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>
-              ENTITY SEARCH
+              Search
             </label>
             <div className="search-bar" style={{ width: 220 }}>
               <Icon name="search" size={14} style={{ opacity: 0.5 }} />
               <input
-                type="text" placeholder="TXID, Address, Cluster..."
+                type="text" placeholder="Address or transaction id"
                 value={filters.search}
                 onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
               />
@@ -65,7 +65,7 @@ export default function Alerts() {
 
           <div>
             <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>
-              RISK TIER
+              Risk
             </label>
             <div className="filter-group">
               {tiers.map(t => (
@@ -74,11 +74,7 @@ export default function Alerts() {
                   className={`filter-chip ${filters.risk_tier === t ? 'selected' : ''}`}
                   onClick={() => setFilters(f => ({ ...f, risk_tier: t }))}
                 >
-                  {t ? (
-                    <><span style={{ display: 'inline-block', width: 8, height: 8,
-                      background: t === 'Critical' ? 'var(--accent-critical)' : t === 'High' ? 'var(--accent-high)' : 'var(--accent-elevated)',
-                      marginRight: 4 }} />{t}</>
-                  ) : 'All'}
+                  {t || 'All'}
                 </span>
               ))}
             </div>
@@ -86,7 +82,7 @@ export default function Alerts() {
 
           <div>
             <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>
-              MIN CONFIDENCE
+              Min confidence
             </label>
             <div className="slider-control" style={{ width: 180 }}>
               <input
@@ -100,7 +96,7 @@ export default function Alerts() {
             </div>
           </div>
 
-          <button className="btn btn-primary" onClick={fetchAlerts}>Apply Filters</button>
+          <button className="btn btn-primary" onClick={fetchAlerts}>Apply</button>
         </div>
       </div>
 
@@ -113,7 +109,6 @@ export default function Alerts() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Status</th>
                   <th>Risk</th>
                   <th>Entity ID</th>
                   <th>Model</th>
@@ -125,16 +120,6 @@ export default function Alerts() {
               <tbody>
                 {alerts.map((alert) => (
                   <tr key={alert.alert_id}>
-                    <td>
-                      <Icon
-                        name="alertTriangle"
-                        size={15}
-                        style={{
-                          color: alert.risk_tier === 'Critical' ? 'var(--accent-critical)'
-                            : alert.risk_tier === 'High' ? 'var(--accent-high)' : 'var(--accent-elevated)',
-                        }}
-                      />
-                    </td>
                     <td>
                       <span className={`badge ${alert.risk_tier?.toLowerCase()}`}>
                         {alert.risk_tier}

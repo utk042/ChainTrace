@@ -58,7 +58,7 @@ export default function Wallets() {
         ))}
       </div>
 
-      <div className={`split-view-container ${detail ? 'has-detail' : ''}`} style={{ display: 'grid', gridTemplateColumns: detail ? '1fr 400px' : '1fr', gap: 'var(--space-xl)' }}>
+      <div className={`split-view-container ${detail ? 'has-detail' : ''}`} style={{ display: 'grid', gridTemplateColumns: detail ? 'minmax(0, 1fr) 380px' : 'minmax(0, 1fr)', gap: 'var(--space-xl)' }}>
         <div>
           {loading ? <div className="loading-spinner"><div className="spinner" /></div> : (
             <>
@@ -133,7 +133,7 @@ export default function Wallets() {
         {detail && (
           <div className="card slide-in" style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-md)' }}>
-              <h3 style={{ fontSize: 'var(--text-md)' }}>Wallet Detail</h3>
+              <h3 style={{ fontSize: 'var(--text-lg)' }}>Wallet</h3>
               <span style={{ cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex' }} onClick={() => { setDetail(null); setSelected(null); }}>
                 <Icon name="close" size={16} />
               </span>
@@ -176,7 +176,7 @@ export default function Wallets() {
                 <div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <span className={`badge ${detail.risk_tier?.toLowerCase()}`}>{detail.risk_tier}</span>
-                    {detail.is_seed_wallet && <span className="badge critical">Watchlist Seed</span>}
+                    {detail.is_seed_wallet && <span className="badge critical">Watchlist</span>}
                   </div>
                   {detail.cluster_id != null && (
                     <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
@@ -189,7 +189,7 @@ export default function Wallets() {
 
             {(detail.peel_chain_role || detail.mixer_interaction_count > 0 || detail.darknet_proximity_hops != null) && (
               <div style={{ marginBottom: 'var(--space-lg)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div className="card-title">Detected Patterns</div>
+                <div className="card-title">Patterns</div>
                 {detail.peel_chain_role && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)',
                     padding: '8px 10px', background: 'var(--accent-elevated-bg)', border: '1px solid var(--accent-elevated)' }}>
@@ -215,7 +215,7 @@ export default function Wallets() {
                     padding: '8px 10px', background: 'var(--accent-critical-bg)', border: '1px solid var(--accent-critical-border)' }}>
                     <Icon name="flag" size={13} style={{ color: 'var(--accent-critical)', flexShrink: 0 }} />
                     <span style={{ color: 'var(--text-secondary)' }}>
-                      <b style={{ color: 'var(--text-primary)' }}>{detail.darknet_proximity_hops}</b> hop(s) from a watchlisted seed wallet
+                      <b style={{ color: 'var(--text-primary)' }}>{detail.darknet_proximity_hops}</b> hop(s) from a watchlisted wallet
                       {' '}(proximity {detail.darknet_proximity_score?.toFixed(2)})
                     </span>
                   </div>
@@ -246,7 +246,7 @@ export default function Wallets() {
             {detail.similar_wallets?.length > 0 && (
               <div style={{ marginBottom: 'var(--space-lg)' }}>
                 <div className="card-title" style={{ marginBottom: 'var(--space-sm)' }}>
-                  Similar Wallets <span style={{ color: 'var(--text-tertiary)', fontWeight: 400, textTransform: 'none' }}>— by graph embedding</span>
+                  Similar wallets <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>by embedding</span>
                 </div>
                 {detail.similar_wallets.map((s, i) => (
                   <div key={i}
@@ -256,7 +256,7 @@ export default function Wallets() {
                       padding: '6px 0', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-primary)' }}
                   >
                     <span>{s.address.length > 24 ? `${s.address.slice(0, 12)}...${s.address.slice(-8)}` : s.address}</span>
-                    <span style={{ color: 'var(--accent)' }}>{(s.similarity * 100).toFixed(0)}%</span>
+                    <span style={{ color: 'var(--accent-ai)' }}>{(s.similarity * 100).toFixed(0)}%</span>
                   </div>
                 ))}
               </div>
@@ -276,7 +276,7 @@ export default function Wallets() {
 
             {detail.recent_transactions?.length > 0 && (
               <div>
-                <div className="card-title" style={{ marginBottom: 'var(--space-sm)' }}>Recent Transactions</div>
+                <div className="card-title" style={{ marginBottom: 'var(--space-sm)' }}>Recent transactions</div>
                 {detail.recent_transactions.slice(0, 5).map((tx, i) => (
                   <div key={i} style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)',
                     padding: '6px 0', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-primary)' }}>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useMemo, useCallback } from 'react';
 import { SigmaContainer, useLoadGraph, useSigma, useRegisterEvents } from '@react-sigma/core';
 import Graph from 'graphology';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
-import { CANVAS, nodeColor, edgeColor } from '../../theme';
+import { CANVAS, SURFACE, nodeColor, edgeColor } from '../../theme';
 
 /**
  * The Sigma canvas and everything that talks to the Sigma instance directly:
@@ -327,7 +327,7 @@ function Controller({ controlRef, onLayoutRunning }) {
         out.width = first.width;
         out.height = first.height;
         const ctx = out.getContext('2d');
-        ctx.fillStyle = '#07080a';
+        ctx.fillStyle = SURFACE.base;
         ctx.fillRect(0, 0, out.width, out.height);
         order.forEach((layer) => {
           if (canvases[layer]) ctx.drawImage(canvases[layer], 0, 0);

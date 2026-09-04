@@ -2,70 +2,66 @@
  * Colour values for the places CSS can't reach: the WebGL graph canvas and
  * the ECharts options objects. Mirrors the tokens in index.css.
  *
- * The graph derives node colour from type and risk here rather than trusting
- * the colour a payload carried, so a palette change reaches live data and the
- * bundled snapshot alike with no re-export.
- *
- * Two non-overlapping vocabularies — entity type, and risk tier. Risk wins
- * where both apply. The violet accent means interactive or selected and
- * never encodes anything about the data.
+ * Monochrome. With no hue to spend, the graph separates entity types by
+ * luminance and risk by luminance plus node size, and every legend row is
+ * labelled in text. Risk wins where both apply.
  */
 
 export const SURFACE = {
   base: '#000000',
-  chrome: '#08080b',
-  raised: '#0d0d13',
-  inset: '#121219',
-  border: '#1b1b24',
-  borderStrong: '#2e2e3c',
+  chrome: '#0A0A0A',
+  raised: '#0A0A0A',
+  inset: '#141414',
+  border: '#262626',
+  borderStrong: '#404040',
 };
 
 export const TEXT = {
-  primary: '#e8e8ef',
-  secondary: '#9494a6',
-  tertiary: '#63636f',
-  muted: '#45454f',
+  primary: '#F5F5F5',
+  secondary: '#A3A3A3',
+  tertiary: '#737373',
+  muted: '#525252',
 };
 
-export const ACCENT = '#8b7cf6';
+export const ACCENT = '#F5F5F5';
 
 export const TYPE_COLORS = {
-  wallet: '#8b7cf6',       // violet: the primary entity
-  transaction: '#4a4a5c',  // recessive: connective tissue
-  ip: '#5a8ca8',           // steel: the network layer
-  unknown: '#3f3f4c',
+  wallet: '#8A8A8A',       // the primary entity, mid-gray
+  transaction: '#3D3D3D',  // recessive: connective tissue
+  ip: '#5E5E5E',           // the network layer
+  unknown: '#333333',
 };
 
-// Red -> orange -> yellow, spaced far enough apart to stay distinguishable
-// at an 8px legend dot.
+// Severity by luminance: the worse it is, the brighter it burns against
+// the black ground. Labels carry the tier name everywhere it is shown.
 export const RISK_COLORS = {
-  Critical: '#f0484f',
-  High: '#e8913a',
-  Elevated: '#d8c33f',
-  Low: '#3da35d',
-  Normal: '#33333f',
+  Critical: '#FFFFFF',
+  High: '#B0B0B0',
+  Elevated: '#7D7D7D',
+  Low: '#4A4A4A',
+  Normal: '#2E2E2E',
 };
 
 /** Canvas colours that aren't entity data. */
 export const CANVAS = {
-  dimNode: '#191922',
-  dimEdge: '#101016',
-  edge: '#1c1c26',
+  dimNode: '#1C1C1C',
+  dimEdge: '#111111',
+  edge: '#242424',
   highlight: ACCENT,
-  path: '#e8913a',
-  label: '#c8c8d6',
-  hoverBg: 'rgba(13, 13, 19, 0.96)',
+  path: '#FFFFFF',
+  label: '#C8C8C8',
+  hoverBg: 'rgba(10, 10, 10, 0.96)',
   hoverBorder: SURFACE.borderStrong,
   hoverText: TEXT.primary,
 };
 
 /** Edge colours by relationship, muted enough to stay context. */
 export const EDGE_COLORS = {
-  co_input: '#5a4560',      // co-ownership inference
-  wallet_input: '#2c3a52',
-  wallet_output: '#2b4a3e',
-  ip_observed_tx: '#33304a',
-  unknown: '#1c1c26',
+  co_input: '#4A4A4A',      // co-ownership inference, the loudest edge
+  wallet_input: '#303030',
+  wallet_output: '#303030',
+  ip_observed_tx: '#242424',
+  unknown: '#1C1C1C',
 };
 
 export const nodeColor = (nodeType, riskTier) =>

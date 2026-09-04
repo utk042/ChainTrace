@@ -43,14 +43,14 @@ export default function Transactions() {
         <div className="search-bar" style={{ width: 400 }}>
           <Icon name="search" size={14} style={{ opacity: 0.5 }} />
           <input
-            type="text" placeholder="Search TXID, Address, Block..."
+            type="text" placeholder="Search transaction id, address or block"
             value={search} onChange={e => setSearch(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && fetchTransactions()}
           />
         </div>
       </div>
 
-      <div className={`split-view-container ${detail ? 'has-detail' : ''}`} style={{ display: 'grid', gridTemplateColumns: detail ? '1fr 440px' : '1fr', gap: 'var(--space-xl)' }}>
+      <div className={`split-view-container ${detail ? 'has-detail' : ''}`} style={{ display: 'grid', gridTemplateColumns: detail ? 'minmax(0, 1fr) 400px' : 'minmax(0, 1fr)', gap: 'var(--space-xl)' }}>
         <div>
           {loading ? <div className="loading-spinner"><div className="spinner" /></div> : (
             <>
@@ -102,7 +102,7 @@ export default function Transactions() {
         {detail && (
           <div className="card slide-in" style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-md)' }}>
-              <h3 style={{ fontSize: 'var(--text-md)' }}>Transaction Metadata</h3>
+              <h3 style={{ fontSize: 'var(--text-lg)' }}>Transaction</h3>
               <span style={{ cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex' }} onClick={() => { setDetail(null); setSelected(null); }}>
                 <Icon name="close" size={16} />
               </span>
@@ -118,13 +118,13 @@ export default function Transactions() {
             <div style={{ background: 'var(--bg-tertiary)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)',
               marginBottom: 'var(--space-lg)', display: 'flex', justifyContent: 'space-around' }}>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>Total In</div>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>In</div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-md)', fontWeight: 600 }}>
                   {detail.total_input?.toFixed(8)} BTC
                 </div>
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>Total Out</div>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>Out</div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-md)', fontWeight: 600 }}>
                   {detail.total_output?.toFixed(8)} BTC
                 </div>
@@ -157,7 +157,7 @@ export default function Transactions() {
             {/* Behavioral Flags */}
             {detail.behavioral_flags?.length > 0 && (
               <div style={{ marginBottom: 'var(--space-lg)' }}>
-                <div className="card-title" style={{ marginBottom: 'var(--space-sm)' }}>Behavioral Flags</div>
+                <div className="card-title" style={{ marginBottom: 'var(--space-sm)' }}>Flags</div>
                 {detail.behavioral_flags.map((flag, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)', color: 'var(--accent-critical)', padding: '4px 0' }}>
                     <Icon name="flag" size={13} /> {flag}
