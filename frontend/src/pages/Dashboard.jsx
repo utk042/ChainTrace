@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { getDashboardStats, getTimeline, getRiskDistribution, getTopAlerts } from '../services/api';
 import {
-  RISK_COLORS, ACCENT, chartAxis, chartValueAxis, chartTooltip,
+  RISK_COLORS, chartAxis, chartValueAxis, chartTooltip,
 } from '../theme';
 
 const TIER_ORDER = ['Critical', 'High', 'Elevated', 'Low', 'Normal'];

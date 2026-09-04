@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getWallets, getWalletDetail } from '../services/api';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import Icon from '../components/Icon';
 
 export default function Wallets() {
@@ -11,21 +12,35 @@ export default function Wallets() {
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const query = useDebouncedValue(search, 300);
 
   const fetchWallets = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const params = { page, page_size: 20, sort_by: 'anomaly_score', sort_order: 'desc' };
-      if (search) params.search = search;
+      if (query) params.search = query;
       if (riskFilter) params.risk_tier = riskFilter;
       const res = await getWallets(params);
       setWallets(res.data.wallets || []);
       setTotal(res.data.total || 0);
-    } catch (e) {}
+    } catch (e) {
+      setWallets([]);
+      setTotal(0);
+      setError(e.response
+        ? `The backend returned ${e.response.status} for /api/wallets.`
+        : 'Could not reach the backend, and no stored copy of this query is available offline.');
+    }
     setLoading(false);
-  }, [page, search, riskFilter]);
+  }, [page, query, riskFilter]);
 
   useEffect(() => { fetchWallets(); }, [fetchWallets]);
+
+  // A new search invalidates the page number: page 3 of the old result set is
+  // usually past the end of the new one, which reads as "no results".
+  useEffect(() => { setPage(1); }, [query, riskFilter]);
 
   const handleSelect = async (address) => {
     setSelected(address);
@@ -47,7 +62,6 @@ export default function Wallets() {
           <input
             type="text" placeholder="Search wallet address..."
             value={search} onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && fetchWallets()}
           />
         </div>
         {['', 'Critical', 'High', 'Elevated'].map(t => (
@@ -60,7 +74,11 @@ export default function Wallets() {
 
       <div className={`split-view-container ${detail ? 'has-detail' : ''}`} style={{ display: 'grid', gridTemplateColumns: detail ? '1fr 400px' : '1fr', gap: 'var(--space-xl)' }}>
         <div>
-          {loading ? <div className="loading-spinner"><div className="spinner" /></div> : (
+          {error ? (
+            <div className="card" style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+              <b style={{ color: 'var(--accent-critical)' }}>Could not load wallets.</b> {error}
+            </div>
+          ) : loading ? <div className="loading-spinner"><div className="spinner" /></div> : (
             <>
               <div className="table-responsive">
                 <table className="data-table">

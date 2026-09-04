@@ -23,6 +23,15 @@ if (!existsSync(htmlPath)) {
 
 let html = readFileSync(htmlPath, 'utf8');
 
+// A file:// document cannot register a service worker or resolve the
+// manifest and icon files, so every reference to them would resolve to a
+// missing sibling. Strip them: the single-file build is already the most
+// offline-capable shape there is, with nothing left to cache.
+html = html
+  .replace(/\s*<link[^>]+rel="manifest"[^>]*>/g, '')
+  .replace(/\s*<link[^>]+rel="(?:apple-touch-)?icon"[^>]*>/g, '')
+  .replace(/\s*<link[^>]+rel="preload"[^>]+as="font"[^>]*>/g, '');
+
 // Fonts first: the CSS we inline below references them.
 const fontDir = join(dist, 'fonts');
 const fonts = existsSync(fontDir) ? readdirSync(fontDir).filter((f) => f.endsWith('.woff2')) : [];

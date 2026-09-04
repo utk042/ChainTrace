@@ -3,12 +3,25 @@ import Icon from '../Icon';
 import { useBackendStatus } from '../../hooks/useBackendStatus';
 import { isDemoMode, setDemoMode } from '../../services/api';
 
+/** "20 min ago" / "2026-09-04 12:14 UTC" — enough to judge staleness at a glance. */
+function formatCachedAt(iso) {
+  if (!iso) return 'an earlier session';
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return 'an earlier session';
+  const minutes = Math.round((Date.now() - then.getTime()) / 60000);
+  if (minutes < 1) return 'moments ago';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${then.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
 /**
  * One line across the top of the app when the session isn't a normal
  * connected one, naming the problem and the page that fixes it.
  */
 export default function ConnectionBanner() {
-  const { status, apiUrl, error, recheck } = useBackendStatus();
+  const { status, apiUrl, error, recheck, cachedAt, online } = useBackendStatus();
   const demo = isDemoMode();
 
   const enterDemo = () => { setDemoMode(true); window.location.reload(); };
@@ -31,17 +44,39 @@ export default function ConnectionBanner() {
     );
   }
 
+  // Reachable and current: nothing to say.
   if (status === 'checking' || status === 'ready') return null;
+
+  // Serving what the service worker stored. The data is genuine backend
+  // output, so the point of the banner is its age, not an error.
+  if (status === 'offline') {
+    return (
+      <div className="conn-banner conn-banner-offline">
+        <Icon name="cloudOff" size={13} />
+        <span>
+          <b>{online ? 'Backend unreachable' : 'Offline'}</b> — showing stored
+          results from <b>{formatCachedAt(cachedAt)}</b>. This is real output
+          from the last time the backend answered, not live state; anything
+          ingested since is not here, and writes are unavailable until the
+          connection returns.
+        </span>
+        <div className="conn-banner-actions">
+          <button onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
+          <Link to="/settings">Offline settings</Link>
+        </div>
+      </div>
+    );
+  }
 
   if (status === 'down') {
     return (
       <div className="conn-banner conn-banner-error">
-        <Icon name="alertTriangle" size={13} />
+        <Icon name={online ? 'alertTriangle' : 'wifiOff'} size={13} />
         <span>
-          <b>Backend unreachable</b> — {error}{' '}
-          {apiUrl
+          <b>{online ? 'Backend unreachable' : 'Offline — nothing stored yet'}</b> — {error}{' '}
+          {online && (apiUrl
             ? <>Configured API URL: <code>{apiUrl}</code>.</>
-            : <>No API URL is configured, so requests are going to this site's own domain. On a hosted build set <code>VITE_API_URL</code> at build time, or point this build at a backend in Settings.</>}
+            : <>No API URL is configured, so requests are going to this site's own domain. On a hosted build set <code>VITE_API_URL</code> at build time, or point this build at a backend in Settings.</>)}
         </span>
         <div className="conn-banner-actions">
           <button onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
