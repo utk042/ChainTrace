@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getAlerts, exportAlerts } from '../services/api';
+import { saveBlob } from '../services/download';
 import Icon from '../components/Icon';
 
 const PAGE_SIZE = 20;
@@ -20,20 +21,6 @@ const rowsToCsv = (rows) => [
   CSV_COLUMNS.map(([, label]) => csvCell(label)).join(','),
   ...rows.map((row) => CSV_COLUMNS.map(([key]) => csvCell(row[key])).join(',')),
 ].join('\r\n');
-
-/** Hand a blob to the browser as a download, then release it. */
-function saveBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  // Firefox ignores click() on an element outside the document.
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  // Revoking synchronously can cancel the download in some browsers.
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
 
 export default function Alerts() {
   const [alerts, setAlerts] = useState([]);
