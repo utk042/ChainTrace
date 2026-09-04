@@ -42,8 +42,9 @@ def list_wallets(
     min_score: float = 0.0,
     sort_by: str = "anomaly_score",
     sort_order: str = "desc",
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1, description="1-based page number."),
+    page_size: int = Query(20, ge=1, le=10_000,
+                           description="Rows per page. Bounded so one request cannot pull the whole table into memory."),
 ):
     """List wallets with filtering and pagination."""
     with get_db_readonly() as con:
