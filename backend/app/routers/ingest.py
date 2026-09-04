@@ -8,7 +8,7 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query
 from app.config import settings
 from app.database import get_db
 from app.ingestion.parser import parse_file
@@ -28,24 +28,95 @@ _pipeline_status = {
     "run_id": None,
 }
 
+# Only the formats app/ingestion/parser.py can actually read.
+ALLOWED_UPLOAD_SUFFIXES = {".csv", ".json", ".xml"}
+
+# Uploads are streamed to disk, so this bounds disk rather than memory. The
+# ceiling matters most on a small hosted instance, where the pipeline that
+# follows needs far more headroom than the file itself.
+MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+
+
+def _safe_upload_path(upload_dir: Path, filename: str | None) -> Path:
+    """
+    Resolve a client-supplied filename to a path inside `upload_dir`.
+
+    The name arrives from the browser and is not trustworthy: an absolute
+    path ("/etc/cron.d/evil") replaces the directory outright, and "../"
+    segments walk out of it, so a plain `upload_dir / filename` is an
+    arbitrary file write. Take the basename, check the extension, then
+    confirm the resolved path really is inside the directory before it is
+    opened for writing.
+    """
+    name = Path(filename or "").name.strip()
+    if not name or name.startswith("."):
+        raise HTTPException(status_code=400, detail="A file name is required.")
+
+    suffix = Path(name).suffix.lower()
+    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type '{suffix or name}'. "
+                   f"Expected one of: {', '.join(sorted(ALLOWED_UPLOAD_SUFFIXES))}.",
+        )
+
+    target = (upload_dir / name).resolve()
+    if not target.is_relative_to(upload_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+    return target
+
+
+def _resolve_data_file(file_path: str) -> Path:
+    """
+    Confirm a caller-supplied pipeline input is one of ours.
+
+    /run takes a path as a query parameter, so without this any file the
+    backend process can read could be handed to the parser, and its contents
+    surfaced through parse errors and the ingested rows.
+    """
+    data_dir = settings.DATA_DIR.resolve()
+    candidate = Path(file_path).expanduser().resolve()
+    if not candidate.is_relative_to(data_dir):
+        raise HTTPException(
+            status_code=400,
+            detail="file_path must name a file inside the backend's data directory.",
+        )
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail=f"No such file: {file_path}")
+    return candidate
+
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     """Upload a data file (CSV/JSON/XML) for ingestion."""
     upload_dir = settings.DATA_DIR / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = _safe_upload_path(upload_dir, file.filename)
 
-    # Save uploaded file
-    file_path = upload_dir / file.filename
-    with open(file_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+    # Streamed in chunks rather than read() into memory: a transaction dump
+    # is routinely hundreds of megabytes, and buffering one whole would take
+    # the container down on a 512 MB instance before parsing even began.
+    written = 0
+    try:
+        with open(file_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB upload limit.",
+                    )
+                f.write(chunk)
+    except Exception:
+        # Do not leave a partial file behind for /run to pick up as input.
+        file_path.unlink(missing_ok=True)
+        raise
 
     return {
-        "filename": file.filename,
-        "size_bytes": len(content),
+        "filename": file_path.name,
+        "size_bytes": written,
         "path": str(file_path),
-        "message": f"File uploaded successfully. Call /api/ingest/run to process.",
+        "message": "File uploaded successfully. Call /api/ingest/run to process.",
     }
 
 
@@ -82,11 +153,19 @@ async def run_pipeline(
                     file_path = str(files[0])
                     break
 
-    if not file_path or not Path(file_path).exists():
+    if not file_path:
         _pipeline_status = {"status": "error", "progress": 0,
                             "message": "No data file found. Upload a file first.", "run_id": run_id}
         return {"error": "No data file found"}
 
+    try:
+        resolved = _resolve_data_file(file_path)
+    except HTTPException:
+        _pipeline_status = {"status": "error", "progress": 0,
+                            "message": f"Cannot read {file_path}.", "run_id": run_id}
+        raise
+
+    file_path = str(resolved)
     background_tasks.add_task(_execute_pipeline, file_path, run_id, clear_existing)
 
     return {
@@ -103,7 +182,10 @@ def get_pipeline_status():
 
 
 @router.post("/generate-sample")
-async def generate_sample_data(count: int = 5000):
+async def generate_sample_data(
+    count: int = Query(5000, ge=1, le=200_000,
+                       description="Number of synthetic transactions to generate."),
+):
     """Generate synthetic sample data."""
     import sys
     if str(settings.BASE_DIR) not in sys.path:
@@ -141,7 +223,10 @@ async def generate_sample_data(count: int = 5000):
 
 
 @router.post("/fetch-real")
-async def fetch_real_data(max_transactions: int = 500, max_blocks: int = 10):
+async def fetch_real_data(
+    max_transactions: int = Query(500, ge=1, le=20_000),
+    max_blocks: int = Query(10, ge=1, le=200),
+):
     """
     Pull genuine, verifiable on-chain Bitcoin transactions from Blockstream's
     public Esplora API (recent confirmed blocks) and save them in
