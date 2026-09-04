@@ -3,8 +3,8 @@ import Icon from '../Icon';
 import { useBackendStatus } from '../../hooks/useBackendStatus';
 import { isDemoMode, setDemoMode } from '../../services/api';
 
-/** "14:02 UTC today" / "3 Sep, 14:02 UTC" — enough to judge staleness at a glance. */
-export function formatCachedAt(iso) {
+/** "20 min ago" / "2026-09-04 12:14 UTC" — enough to judge staleness at a glance. */
+function formatCachedAt(iso) {
   if (!iso) return 'an earlier session';
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return 'an earlier session';

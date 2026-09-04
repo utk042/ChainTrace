@@ -2,7 +2,6 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Layout/Sidebar';
 import TopBar from './components/Layout/TopBar';
-import StatusBar from './components/Layout/StatusBar';
 import ConnectionBanner from './components/Layout/ConnectionBanner';
 import UpdatePrompt from './components/Layout/UpdatePrompt';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -56,7 +55,6 @@ export default function App() {
               </Routes>
             </Suspense>
           </ErrorBoundary>
-          <StatusBar />
         </div>
         <UpdatePrompt />
       </div>
