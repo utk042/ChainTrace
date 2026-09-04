@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ChainTrace">
+  <rect width="512" height="512" fill="#000000"/>
+  <g fill="none" stroke="#8b7cf6" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Three linked nodes: the entity graph the tool is built around. -->
+    <circle cx="176" cy="168" r="42"/>
+    <circle cx="336" cy="168" r="42"/>
+    <circle cx="256" cy="360" r="42"/>
+    <path d="M218 168h76"/>
+    <path d="M197 206l38 116"/>
+    <path d="M315 206l-38 116"/>
+  </g>
+</svg>

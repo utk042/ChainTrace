@@ -2,6 +2,39 @@ import { useState, useEffect, useCallback } from 'react';
 import { getAlerts, exportAlerts } from '../services/api';
 import Icon from '../components/Icon';
 
+const PAGE_SIZE = 20;
+
+/** RFC 4180 quoting: a description with a comma or a quote must survive. */
+const csvCell = (value) => {
+  const text = value === null || value === undefined ? '' : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+const CSV_COLUMNS = [
+  ['alert_id', 'Alert ID'], ['entity_id', 'Entity ID'], ['entity_type', 'Entity type'],
+  ['risk_tier', 'Risk tier'], ['confidence', 'Confidence'], ['model', 'Model'],
+  ['status', 'Status'], ['description', 'Description'], ['timestamp', 'Timestamp'],
+];
+
+const rowsToCsv = (rows) => [
+  CSV_COLUMNS.map(([, label]) => csvCell(label)).join(','),
+  ...rows.map((row) => CSV_COLUMNS.map(([key]) => csvCell(row[key])).join(',')),
+].join('\r\n');
+
+/** Hand a blob to the browser as a download, then release it. */
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  // Firefox ignores click() on an element outside the document.
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoking synchronously can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 export default function Alerts() {
   const [alerts, setAlerts] = useState([]);
   const [total, setTotal] = useState(0);
@@ -10,28 +43,58 @@ export default function Alerts() {
     risk_tier: '', min_confidence: 0, search: '', sort_by: 'confidence', sort_order: 'desc',
   });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [exportNote, setExportNote] = useState(null);
 
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const params = { page, page_size: 20, ...filters };
+      const params = { page, page_size: PAGE_SIZE, ...filters };
       Object.keys(params).forEach(k => !params[k] && params[k] !== 0 && delete params[k]);
       const res = await getAlerts(params);
       setAlerts(res.data.alerts || []);
       setTotal(res.data.total || 0);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      // Silently swallowing this left an empty table that looked like a
+      // clean result set rather than a failed request.
+      setAlerts([]);
+      setTotal(0);
+      setError(e.response
+        ? `The backend returned ${e.response.status} for /api/alerts.`
+        : 'Could not reach the backend, and no stored copy of this query is available offline.');
+    }
     setLoading(false);
   }, [page, filters]);
 
   useEffect(() => { fetchAlerts(); }, [fetchAlerts]);
 
+  /** Changing a filter invalidates the page number: page 3 of the old result
+   *  set is usually past the end of the new one, which read as "no alerts". */
+  const updateFilters = useCallback((update) => {
+    setPage(1);
+    setFilters(update);
+  }, []);
+
   const handleExport = async () => {
+    setExportNote(null);
     try {
       const res = await exportAlerts();
-      const url = URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement('a'); a.href = url;
-      a.download = 'chaintrace_alerts.csv'; a.click();
-    } catch (e) { console.error(e); }
+      saveBlob(new Blob([res.data], { type: 'text/csv;charset=utf-8' }), 'chaintrace_alerts.csv');
+      return;
+    } catch { /* no server-side export: build it here instead */ }
+
+    // Snapshot mode and offline sessions have the rows but no export
+    // endpoint. Export what is actually available and say what that was.
+    try {
+      const res = await getAlerts({ page: 1, page_size: 10000, ...filters });
+      const rows = res.data?.alerts || [];
+      if (!rows.length) { setExportNote('There is nothing to export.'); return; }
+      saveBlob(new Blob([rowsToCsv(rows)], { type: 'text/csv;charset=utf-8' }), 'chaintrace_alerts.csv');
+      setExportNote(`Exported ${rows.length.toLocaleString()} alerts from stored data — the backend's export endpoint was not reachable.`);
+    } catch {
+      setExportNote('Export failed: the backend is unreachable and no stored alerts are available.');
+    }
   };
 
   const tiers = ['', 'Critical', 'High', 'Elevated'];
@@ -58,7 +121,7 @@ export default function Alerts() {
               <input
                 type="text" placeholder="TXID, Address, Cluster..."
                 value={filters.search}
-                onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+                onChange={e => updateFilters({ ...filters, search: e.target.value })}
               />
             </div>
           </div>
@@ -72,7 +135,7 @@ export default function Alerts() {
                 <span
                   key={t || 'all'}
                   className={`filter-chip ${filters.risk_tier === t ? 'selected' : ''}`}
-                  onClick={() => setFilters(f => ({ ...f, risk_tier: t }))}
+                  onClick={() => updateFilters({ ...filters, risk_tier: t })}
                 >
                   {t ? (
                     <><span style={{ display: 'inline-block', width: 8, height: 8,
@@ -92,7 +155,7 @@ export default function Alerts() {
               <input
                 type="range" min="0" max="100" step="5"
                 value={filters.min_confidence}
-                onChange={e => setFilters(f => ({ ...f, min_confidence: Number(e.target.value) }))}
+                onChange={e => updateFilters({ ...filters, min_confidence: Number(e.target.value) })}
               />
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', width: 40 }}>
                 {filters.min_confidence}%
@@ -104,8 +167,18 @@ export default function Alerts() {
         </div>
       </div>
 
+      {exportNote && (
+        <div className="card" style={{ marginBottom: 'var(--space-lg)', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+          {exportNote}
+        </div>
+      )}
+
       {/* Table */}
-      {loading ? (
+      {error ? (
+        <div className="card" style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+          <b style={{ color: 'var(--accent-critical)' }}>Could not load alerts.</b> {error}
+        </div>
+      ) : loading ? (
         <div className="loading-spinner"><div className="spinner" /></div>
       ) : (
         <>
@@ -123,6 +196,13 @@ export default function Alerts() {
                 </tr>
               </thead>
               <tbody>
+                {alerts.length === 0 && (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-tertiary)', padding: 'var(--space-xl)' }}>
+                      No alerts match these filters.
+                    </td>
+                  </tr>
+                )}
                 {alerts.map((alert) => (
                   <tr key={alert.alert_id}>
                     <td>
@@ -167,8 +247,8 @@ export default function Alerts() {
 
           <div className="pagination">
             <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}><Icon name="chevronLeft" size={13} /> Prev</button>
-            <span className="page-info">Page {page} of {Math.max(1, Math.ceil(total / 20))}</span>
-            <button disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(p => p + 1)}>Next <Icon name="chevronRight" size={13} /></button>
+            <span className="page-info">Page {page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span>
+            <button disabled={page >= Math.ceil(total / PAGE_SIZE)} onClick={() => setPage(p => p + 1)}>Next <Icon name="chevronRight" size={13} /></button>
           </div>
         </>
       )}

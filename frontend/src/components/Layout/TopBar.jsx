@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { getDashboardStats } from '../../services/api';
+import { useNavigate } from 'react-router-dom';
+import { getDashboardStats, isDemoMode } from '../../services/api';
 import { useBackendStatus } from '../../hooks/useBackendStatus';
-import { isDemoMode } from '../../services/api';
 import Icon from '../Icon';
 
 function useClock() {
@@ -14,29 +14,42 @@ function useClock() {
 }
 
 function formatUTC(date) {
-  return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  return `${date.toISOString().replace('T', ' ').slice(0, 19)} UTC`;
 }
 
 /** Connection states for the status pill. */
 const CONNECTION = {
   checking: { label: 'CONNECTING', color: 'var(--accent-elevated)' },
   demo: { label: 'OFFLINE SNAPSHOT', color: 'var(--accent)' },
-  ready: { label: 'CONNECTED · LOCAL', color: 'var(--accent-green)' },
+  ready: { label: 'CONNECTED · LIVE', color: 'var(--accent-green)' },
   empty: { label: 'CONNECTED · NO DATA', color: 'var(--accent-elevated)' },
+  offline: { label: 'OFFLINE · STORED DATA', color: 'var(--accent-elevated)' },
   down: { label: 'BACKEND OFFLINE', color: 'var(--accent-critical)' },
 };
 
 export default function TopBar() {
   const [stats, setStats] = useState(null);
+  const [query, setQuery] = useState('');
   const { status: liveStatus } = useBackendStatus();
+  const navigate = useNavigate();
   // Snapshot mode answers /api/health from bundled data, which would
   // otherwise report a healthy backend that isn't there.
   const status = isDemoMode() ? 'demo' : liveStatus;
+  const connection = CONNECTION[status] || CONNECTION.checking;
   const now = useClock();
 
   useEffect(() => {
-    getDashboardStats().then(res => setStats(res.data)).catch(() => {});
+    getDashboardStats().then((res) => setStats(res.data)).catch(() => {});
   }, []);
+
+  // The graph explorer is the one view that resolves an arbitrary identifier
+  // — address, txid or IP — so global search hands off to it.
+  const runSearch = (event) => {
+    event.preventDefault();
+    const q = query.trim();
+    if (q.length < 2) return;
+    navigate(`/graph?q=${encodeURIComponent(q)}`);
+  };
 
   return (
     <div className="topbar">
@@ -67,18 +80,24 @@ export default function TopBar() {
             </span>
           </div>
         </div>
-        <div className="topbar-status" style={{ color: CONNECTION[status].color }}>
-          <span className="pulse-dot" style={{ background: CONNECTION[status].color }} />
-          {CONNECTION[status].label}
+        <div className="topbar-status" style={{ color: connection.color }}>
+          <span className="pulse-dot" style={{ background: connection.color }} />
+          {connection.label}
         </div>
       </div>
 
       <div className="topbar-right">
         <span className="topbar-clock">{formatUTC(now)}</span>
-        <div className="search-bar" style={{ width: 220 }}>
+        <form className="search-bar" style={{ width: 220 }} onSubmit={runSearch} role="search">
           <Icon name="search" size={14} style={{ opacity: 0.5 }} />
-          <input type="text" placeholder="Search entity, hash, IP..." />
-        </div>
+          <input
+            type="search"
+            placeholder="Search entity, hash, IP..."
+            aria-label="Search the entity graph"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </form>
       </div>
     </div>
   );
