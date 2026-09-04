@@ -5,6 +5,7 @@ import GraphCanvas from '../components/Graph/GraphCanvas';
 import NodeInspector from '../components/Graph/NodeInspector';
 import Icon from '../components/Icon';
 import { TYPE_LEGEND, RISK_LEGEND } from '../theme';
+import { saveUrl, saveBlob, fileStamp } from '../services/download';
 import {
   getGraphData, getSubgraph, searchGraph,
   getNodeDetail, getNeighbors, findPath,
@@ -258,28 +259,28 @@ export default function GraphExplorer() {
   const exportPng = useCallback(() => {
     const url = control.current.snapshot?.();
     if (!url) return flash('Nothing to export yet.');
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `chaintrace-graph-${Date.now()}.png`;
-    a.click();
-    flash('Graph exported as PNG.');
+    // A data URL, so there is nothing to revoke.
+    saveUrl(url, `chaintrace-graph-${fileStamp()}.png`);
+    return flash('Graph exported as PNG.');
   }, [flash]);
 
   const exportJson = useCallback(() => {
     if (!graphData?.nodes?.length) return flash('Nothing to export yet.');
     const blob = new Blob([JSON.stringify(graphData, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `chaintrace-graph-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    flash('Graph exported as JSON.');
+    saveBlob(blob, `chaintrace-graph-${fileStamp()}.json`);
+    return flash('Graph exported as JSON.');
   }, [graphData, flash]);
 
   // ── Keyboard shortcuts ──────────────────────────────────────────
   useEffect(() => {
     const onKey = (e) => {
-      const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
+      // Bare keys only. Without this, Ctrl/Cmd+R resets the graph on its way
+      // to reloading the page, Ctrl+F fits it instead of opening find, and
+      // Cmd+C re-centres the selection instead of copying.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)
+        || e.target.isContentEditable;
       if (e.key === 'Escape') {
         if (typing) { e.target.blur(); return; }
         clearSelection();
