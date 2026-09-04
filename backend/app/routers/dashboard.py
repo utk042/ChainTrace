@@ -3,7 +3,7 @@ ChainTrace Forensics — Dashboard Router
 Provides aggregated statistics and timeline data for the dashboard.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from app.database import get_db_readonly
 from app.models.alert import DashboardStats, TimelinePoint
 
@@ -139,7 +139,7 @@ def get_risk_distribution():
 
 
 @router.get("/top-alerts")
-def get_top_alerts(limit: int = 5):
+def get_top_alerts(limit: int = Query(5, ge=1, le=200)):
     """Get top N alerts by confidence."""
     with get_db_readonly() as con:
         rows = con.execute("""

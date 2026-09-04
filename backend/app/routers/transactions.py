@@ -12,8 +12,9 @@ router = APIRouter(prefix="/api/transactions", tags=["Transactions"])
 @router.get("")
 def list_transactions(
     search: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1, description="1-based page number."),
+    page_size: int = Query(20, ge=1, le=10_000,
+                           description="Rows per page. Bounded so one request cannot pull the whole table into memory."),
     sort_by: str = "timestamp",
     sort_order: str = "desc",
 ):
