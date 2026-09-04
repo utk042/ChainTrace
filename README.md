@@ -67,6 +67,8 @@ score.
 | **HTTP** | Axios | API client | Its custom-adapter hook is what makes offline snapshot mode a ~200-line file instead of a rewrite of every call site |
 | **Fonts** | IBM Plex Sans / Mono, self-hosted | Typography | Self-hosted from `public/fonts` (116 KB). A Google Fonts `@import` blocks first paint on an air-gapped machine and leaks every page load on a connected one |
 | **Styling** | Hand-written CSS custom properties | Design system | ~250 tokens in one file. No Tailwind/CSS-in-JS: nothing to configure, nothing extra in the bundle, and the palette can be re-themed by editing one block |
+| **Offline** | Hand-written service worker | Precaches the app; caches backend reads | ~300 lines against Workbox's dependency tree, and the caching rules here are unusual enough to want to read: cache-first for the shell, network-first for `/api`, and every cached response stamped with its age so the UI can label it |
+| **Icons** | Hand-authored 24×24 SVG set | All UI iconography | No icon font or npm package to fetch; `npm run check:icons` fails the build if a path escapes the viewBox, which is how a mangled glyph shipped looking like a smudge |
 
 ### Deployment
 
@@ -76,6 +78,7 @@ score.
 | **Cloud backend** | Docker on Render | `DEPS=light` build arg + `CT_LIGHT_MODE` so it fits a 512 MB free instance |
 | **Cloud frontend** | Static build on Vercel | `VITE_API_URL` at build time; the SPA rewrite deliberately excludes `/api` so a missing backend URL fails loudly instead of returning HTML to every API call |
 | **Single file** | `npm run build:standalone` | Inlines scripts, styles, fonts and a pipeline snapshot into one HTML file that runs from `file://` with no server, network or backend |
+| **Installable app** | Service worker + web manifest | The app installs to the desktop and opens with no network. `sw.js` and `index.html` are served `no-cache` and hashed assets `immutable`, so a deployment reaches everyone on the next load instead of waiting out a cache |
 
 ## 🚀 Quick Start
 
@@ -114,27 +117,55 @@ docker-compose up --build
 Access at http://localhost:3000. The Compose frontend proxies `/api` to the
 backend container, so no API URL configuration is needed.
 
-### Does it work offline?
+### Offline-first
 
-Yes — completely, on localhost with the network unplugged. The frontend makes
-no third-party requests at all: IBM Plex is served from `frontend/public/fonts`
-rather than Google Fonts, and there are no CDN scripts, analytics or remote
-stylesheets anywhere in the build. The backend is DuckDB-embedded with no
-external services. GeoIP enrichment uses a local MaxMind database if one is
-present and degrades to a deterministic fallback if not.
+ChainTrace is built to be opened on a machine with no network. There are three
+layers to that, and they cover different situations.
+
+**1. The interface installs itself.** A service worker (`frontend/src/sw/`,
+emitted to `/sw.js` at build time) precaches the entire app on the first visit
+— every route chunk, both chart and graph libraries, the fonts, the icons, the
+manifest, and the bundled snapshot. After one connected load, the app opens
+cold with the network unplugged. It is also an installable PWA: **Settings →
+Offline & Data → Install ChainTrace** puts it in its own window with a desktop
+launcher. A new deployment is picked up in the background and offered as a
+"Reload now" prompt rather than applied mid-investigation.
+
+**2. Backend results are stored as you read them.** Every `GET` the app makes
+is cached, and served back when the backend cannot be reached. Before leaving
+a connected network, **Settings → Offline & Data → Save for offline** pulls the
+dashboard, alerts, wallets, transactions and graph down in one pass.
+
+Stored data is never passed off as live. Each cached response carries the time
+it was fetched, and while the app is serving one, the banner reads *"showing
+stored results from 20 min ago"*, the header pill reads `OFFLINE · STORED
+DATA`, and the status bar reads `DATA STORED · AS OF …`. A forensic tool that
+lets an investigator mistake a stale figure for a current one is worse than one
+that simply fails, so the provenance is on screen at all times, and writes
+(ingestion, settings, pipeline runs) are refused rather than queued.
+
+**3. Snapshot mode needs no backend at all.** For a machine that has never
+reached one — a hosted preview link, a demo before the pipeline has been run —
+**Settings → Offline & Data → Offline Snapshot Mode** serves a stored run of
+the full pipeline (4,970 synthetic transactions: real scores, alerts, clusters
+and graph structure) from data bundled into the build itself.
+
+Nothing in the frontend talks to a third party: IBM Plex is served from
+`frontend/public/fonts` rather than Google Fonts, and there are no CDN scripts,
+analytics or remote stylesheets anywhere in the build. The backend is
+DuckDB-embedded with no external services. GeoIP enrichment uses a local
+MaxMind database if one is present and degrades to a deterministic fallback
+if not.
 
 The only feature that needs a network is **Ingest → Fetch Real Blockchain
 Data**, which calls Blockstream's public API by definition. It fails with a
 clear message on an air-gapped machine; fetch the data on a connected machine
 and upload the file instead.
 
-If you want to show the interface with no backend running at all — a hosted
-preview link, a laptop on a plane, a demo before the pipeline has been run —
-turn on **Settings → Offline Snapshot Mode**. It serves a stored run of the
-full pipeline (4,970 synthetic transactions: real scores, alerts, clusters and
-graph structure) from data bundled into the build. It is labelled as a
-snapshot throughout, and ingestion and settings writes are refused rather than
-faked.
+> Service workers are only allowed on HTTPS or `localhost`. Served over plain
+> HTTP from another host, layers 1 and 2 are unavailable — the Settings panel
+> says so rather than silently doing nothing — and snapshot mode or the
+> single-file build below is the way to work offline.
 
 For a copy you can hand to someone as a single attachment:
 
@@ -145,8 +176,10 @@ cd frontend && npm run build:standalone
 
 Scripts, styles, fonts and the snapshot are all embedded, routing goes through
 the hash and snapshot mode is on, so the file opens straight from `file://`
-with no server, no install and no network. (The PNG/JSON export buttons need a
-real browser context; everything else works.)
+with no server, no install and no network. It carries no service worker —
+`file://` cannot register one, and a single self-contained file has nothing
+left to cache. (The PNG/JSON export buttons need a real browser context;
+everything else works.)
 
 ### Cloud deployment (Vercel + Render)
 
@@ -225,7 +258,7 @@ All five forensic thresholds on the Settings page (Mixer Confidence, Darknet Pro
 - **Wallets** — Wallet browser with detail panel: pattern badges (peeling chain / mixer / seed proximity), a risk-score gauge, and a Node2Vec-powered "Similar Wallets" panel
 - **Transactions** — Transaction browser with I/O flow
 - **Ingest** — File upload, synthetic sample generation, or a live fetch of real Blockstream data, then pipeline execution
-- **Settings** — Forensic threshold configuration (all five thresholds are live) + a Seed Watchlist tab for maintaining known-illicit wallets that risk propagation spreads from
+- **Settings** — Forensic threshold configuration (all five thresholds are live), a Seed Watchlist tab for maintaining known-illicit wallets that risk propagation spreads from, and an **Offline & Data** tab for installing the app, storing data for offline use and inspecting what is stored
 
 ### Graph Explorer
 
@@ -277,14 +310,29 @@ Prototype/
 │   └── scripts/
 │       └── generate_synthetic.py
 └── frontend/
-    ├── public/fonts/         # Self-hosted IBM Plex — no Google Fonts request
+    ├── public/
+    │   ├── fonts/            # Self-hosted IBM Plex — no Google Fonts request
+    │   ├── icons/            # PWA app icons
+    │   └── manifest.webmanifest
+    ├── scripts/
+    │   ├── build-standalone.mjs  # Folds a build into one self-contained HTML file
+    │   └── check-icons.mjs       # Fails the build on icon geometry outside the viewBox
     └── src/
         ├── pages/            # 7 pages
         ├── components/
         │   ├── Graph/        # Sigma canvas + node inspector
-        │   └── Layout/       # Sidebar, top bar, status bar, connection banner
-        ├── demo/             # Bundled pipeline snapshot for offline mode
-        └── services/         # API client + offline snapshot adapter
+        │   ├── Layout/       # Sidebar, top bar, status bar, banners, update prompt
+        │   ├── Icon.jsx      # Hand-authored 24x24 icon set
+        │   ├── OfflinePanel.jsx  # Install, store-for-offline and cache controls
+        │   └── ErrorBoundary.jsx # Keeps one page's crash out of the whole app
+        ├── sw/
+        │   └── service-worker.js # Precache + API caching; emitted to /sw.js at build
+        ├── hooks/            # useBackendStatus, useOnline, useDebouncedValue
+        ├── demo/             # Bundled pipeline snapshot for snapshot mode
+        └── services/
+            ├── api.js        # API client + cache-provenance tracking
+            ├── demoAdapter.js  # Serves the bundled snapshot through axios
+            └── offline.js    # Service-worker lifecycle and cache controls
 ```
 
 ## 📝 License

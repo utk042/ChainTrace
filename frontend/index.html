@@ -2,13 +2,37 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="ChainTrace Forensics — AI-Powered Bitcoin Transaction Monitoring & Analysis System for investigative intelligence." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="ChainTrace Forensics — Bitcoin transaction monitoring and entity-graph analysis for investigative intelligence. Installs and runs offline." />
     <title>ChainTrace Forensics | Bitcoin Transaction Intelligence</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔗</text></svg>" />
+
+    <!-- Installable, offline-capable. The manifest and icons are precached
+         by the service worker along with the rest of the shell. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="application-name" content="ChainTrace" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ChainTrace" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/svg+xml" href="/icons/mark.svg" />
+
+    <!-- The two faces that carry the whole interface. Preloading them keeps
+         the first paint from flashing a fallback stack. -->
+    <link rel="preload" href="/fonts/ibm-plex-sans-var.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="background:#000;color:#e8e8f0;font:14px system-ui;padding:40px">
+        <h1 style="font-size:18px">ChainTrace needs JavaScript</h1>
+        <p style="color:#8a8a99">The graph explorer, charts and analysis views all render in the browser.</p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

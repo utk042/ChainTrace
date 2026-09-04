@@ -4,9 +4,70 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
-      "comment": "SPA fallback for client-side routes only. /api must be excluded: a catch-all rewrite answers API calls with index.html and HTTP 200, so a missing VITE_API_URL fails silently as an empty dataset instead of a 404.",
-      "source": "/((?!api/).*)",
+      "comment": "SPA fallback for client-side routes only. /api must be excluded: a catch-all rewrite answers API calls with index.html and HTTP 200, so a missing VITE_API_URL fails silently as an empty dataset instead of a 404. sw.js and the manifest are excluded for the same reason \u2014 rewriting the worker to index.html leaves the app with no offline shell.",
+      "source": "/((?!api/|sw\\.js|manifest\\.webmanifest).*)",
       "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "comment": "Revalidate on every load. A cached service worker keeps serving the previous build's precache, so a deployment reaches nobody until it expires.",
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, must-revalidate"
+        },
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "comment": "Content-hashed filenames: the bytes behind a URL never change.",
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/fonts/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        }
+      ]
     }
   ]
 }
