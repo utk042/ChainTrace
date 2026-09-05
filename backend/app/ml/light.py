@@ -21,6 +21,10 @@ from sklearn.preprocessing import StandardScaler
 
 from app.config import settings
 
+from app.logging_config import get_logger
+
+logger = get_logger("app.ml.light")
+
 BACKEND_NAME = "pca-linear-autoencoder"
 
 
@@ -64,7 +68,7 @@ class PCAAnomalyDetector:
         self.is_trained = True
 
         explained = float(self.pca.explained_variance_ratio_.sum())
-        print(f"  ✓ Linear autoencoder fitted: {n_components} components, "
+        logger.info(f"Linear autoencoder fitted: {n_components} components, "
               f"{explained:.1%} variance retained. Threshold: {self.threshold:.6f}")
 
         return {
@@ -102,6 +106,19 @@ class PCAAnomalyDetector:
         return (X_scaled - reconstructed) ** 2
 
     # ── Persistence ───────────────────────────────────────────────────
+    # Everything sklearn's PCA.transform touches. `explained_variance_` is
+    # not optional decoration: PCA.transform reads it on every call, so a
+    # checkpoint saved without it reloads into an object that raises
+    # `AttributeError: 'PCA' object has no attribute 'explained_variance_'`
+    # the moment it is used. That made every pipeline run after the first
+    # one fail — the first run fits and scores in memory, the second finds
+    # the checkpoint on disk, loads it instead of fitting, and dies at the
+    # scoring step with the model half-built.
+    _CHECKPOINT_KEYS = (
+        "components", "mean", "explained_variance", "explained_variance_ratio",
+        "singular_values", "scaler_mean", "scaler_scale", "threshold",
+    )
+
     def save(self, path: Path = None) -> None:
         path = path or settings.MODELS_DIR
         path.mkdir(parents=True, exist_ok=True)
@@ -109,11 +126,15 @@ class PCAAnomalyDetector:
             path / "linear_autoencoder.npz",
             components=self.pca.components_,
             mean=self.pca.mean_,
+            explained_variance=self.pca.explained_variance_,
+            explained_variance_ratio=self.pca.explained_variance_ratio_,
+            singular_values=self.pca.singular_values_,
+            n_samples=np.array([getattr(self.pca, "n_samples_", 0)]),
             scaler_mean=self.scaler.mean_,
             scaler_scale=self.scaler.scale_,
             threshold=np.array([self.threshold]),
         )
-        print(f"  ✓ Model saved to {path / 'linear_autoencoder.npz'}")
+        logger.info("Model saved to %s", path / "linear_autoencoder.npz")
 
     def load(self, path: Path = None) -> bool:
         path = path or settings.MODELS_DIR
@@ -125,26 +146,66 @@ class PCAAnomalyDetector:
             data = np.load(model_file)
             components = data["components"]
         except Exception as e:
-            print(f"  ⚠ Could not read {model_file} ({e}). Will refit.")
+            logger.warning("Could not read %s (%s). Will refit.", model_file, e)
+            return False
+
+        # A checkpoint written before the fields above were persisted cannot
+        # be rebuilt into a working PCA. Refitting costs one closed-form fit;
+        # loading it anyway costs the whole run.
+        missing = [k for k in self._CHECKPOINT_KEYS if k not in data.files]
+        if missing:
+            logger.warning(
+                "Checkpoint %s predates the current format (missing %s). Will refit.",
+                model_file, ", ".join(missing),
+            )
             return False
 
         # A checkpoint from a different feature schema has the wrong width
         # and would score against the wrong columns.
         if components.shape[1] != settings.AE_INPUT_DIM:
-            print(f"  ⚠ Saved model expects {components.shape[1]} features, current schema "
-                  f"has {settings.AE_INPUT_DIM}. Discarding stale checkpoint, will refit.")
+            logger.warning(
+                "Saved model expects %s features, current schema has %s. "
+                "Discarding stale checkpoint, will refit.",
+                components.shape[1], settings.AE_INPUT_DIM,
+            )
             return False
 
-        self.pca = PCA(n_components=components.shape[0])
-        self.pca.components_ = components
-        self.pca.mean_ = data["mean"]
-        self.pca.n_components_ = components.shape[0]
-        self.pca.n_features_in_ = components.shape[1]
-        self.scaler.mean_ = data["scaler_mean"]
-        self.scaler.scale_ = data["scaler_scale"]
-        self.scaler.n_features_in_ = len(data["scaler_mean"])
+        pca = PCA(n_components=components.shape[0])
+        pca.components_ = components
+        pca.mean_ = data["mean"]
+        pca.explained_variance_ = data["explained_variance"]
+        pca.explained_variance_ratio_ = data["explained_variance_ratio"]
+        pca.singular_values_ = data["singular_values"]
+        pca.n_components_ = components.shape[0]
+        pca.n_features_in_ = components.shape[1]
+        pca.n_samples_ = int(data["n_samples"][0]) if "n_samples" in data.files else 0
+        pca.noise_variance_ = 0.0
+        pca.whiten = False
+
+        scaler = StandardScaler()
+        scaler.mean_ = data["scaler_mean"]
+        scaler.scale_ = data["scaler_scale"]
+        scaler.var_ = scaler.scale_ ** 2
+        scaler.n_features_in_ = len(data["scaler_mean"])
+        scaler.n_samples_seen_ = 1
+
+        # Prove the restored model actually scores before adopting it.
+        # Reconstructing an sklearn estimator by assigning attributes is
+        # inherently version-sensitive, and the failure mode without this
+        # check is not a warning but a dead pipeline run.
+        try:
+            probe = np.zeros((1, settings.AE_INPUT_DIM), dtype=float)
+            pca.inverse_transform(pca.transform(scaler.transform(probe)))
+        except Exception as e:
+            logger.warning(
+                "Restored checkpoint %s is not usable (%s). Will refit.", model_file, e,
+            )
+            return False
+
+        self.pca = pca
+        self.scaler = scaler
         self.threshold = float(data["threshold"][0])
         self.is_trained = True
 
-        print(f"  ✓ Model loaded from {model_file}")
+        logger.info("Model loaded from %s", model_file)
         return True

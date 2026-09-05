@@ -55,6 +55,9 @@ backend/data/real/*
 backend/data/models/*
 !backend/data/models/.gitkeep
 
+# Runtime server logs (rotated in place by app/logging_config.py).
+backend/data/logs/
+
 # Node / Frontend
 node_modules/
 npm-debug.log*

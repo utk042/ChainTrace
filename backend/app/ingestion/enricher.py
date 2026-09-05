@@ -10,6 +10,10 @@ from typing import Optional
 from app.config import settings
 from app.models.transaction import TransactionRecord
 
+from app.logging_config import get_logger
+
+logger = get_logger("app.ingestion.enricher")
+
 # Try to import MaxMind reader
 try:
     import geoip2.database
@@ -41,11 +45,11 @@ class GeoIPEnricher:
         if GEOIP_AVAILABLE and Path(settings.GEOIP_DB_PATH).exists():
             try:
                 self._reader = geoip2.database.Reader(settings.GEOIP_DB_PATH)
-                print("✓ MaxMind GeoLite2 database loaded")
+                logger.info("MaxMind GeoLite2 database loaded")
             except Exception as e:
-                print(f"⚠ Could not load GeoLite2: {e}. Using fallback mapping.")
+                logger.warning(f"Could not load GeoLite2: {e}. Using fallback mapping.")
         else:
-            print("ℹ MaxMind GeoLite2 not available. Using deterministic fallback mapping.")
+            logger.info("MaxMind GeoLite2 not available. Using deterministic fallback mapping.")
 
     def lookup(self, ip: str) -> dict:
         """Look up geographic info for an IP address."""

@@ -1,6 +1,26 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { uploadFile, runPipeline, getPipelineStatus, generateSampleData, fetchRealData } from '../services/api';
+import {
+  uploadFile, runPipeline, getPipelineStatus, getPipelineLogs,
+  generateSampleData, fetchRealData,
+} from '../services/api';
 import Icon from '../components/Icon';
+
+// Static one-liners for stages the backend has not yet annotated with a
+// result of their own.
+const STAGE_HINTS = {
+  clear: 'previous dataset + in-memory analysis state',
+  parse: 'CSV / JSON / XML → records',
+  validate: 'schema + field checks',
+  enrich: 'GeoIP lookup',
+  load: 'DuckDB insert',
+  analyse: 'graph · cluster · score · explain',
+};
+
+const LEVEL_COLOR = {
+  ERROR: 'var(--accent-critical)',
+  CRITICAL: 'var(--accent-critical)',
+  WARNING: 'var(--accent-elevated)',
+};
 
 export default function Ingest() {
   const [file, setFile] = useState(null);
@@ -8,7 +28,12 @@ export default function Ingest() {
   const [pipelineStatus, setPipelineStatus] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [logFile, setLogFile] = useState(null);
+  const [showLogs, setShowLogs] = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
   const fileInputRef = useRef(null);
+  const logEndRef = useRef(null);
 
   // Check initial status on mount
   useEffect(() => {
@@ -25,21 +50,43 @@ export default function Ingest() {
       .catch(() => {});
   }, []);
 
+  // The backend's own log for this run. A pipeline that fails on a machine
+  // where the server's terminal is out of sight — or, as happened here, gone
+  // entirely — left the operator with a single line of text and no way to
+  // find out more. This pulls the run's log back into the page.
+  const refreshLogs = useCallback(async (runId) => {
+    try {
+      const res = await getPipelineLogs(runId || null, 300);
+      setLogs(res.data?.records || []);
+      setLogFile(res.data?.log_file || null);
+    } catch {
+      // Leave whatever is already shown; the status panel reports the failure.
+    }
+  }, []);
+
   // Poll pipeline status
   useEffect(() => {
-    if (!polling) return;
+    if (!polling) return undefined;
     const interval = setInterval(async () => {
       try {
         const res = await getPipelineStatus();
         setPipelineStatus(res.data);
+        refreshLogs(res.data?.run_id);
         if (res.data.status === 'completed' || res.data.status === 'error') {
           setPolling(false);
           setIsProcessing(false);
+          // A failed run is the one an operator needs to read, so open the
+          // log instead of making them go looking for it.
+          if (res.data.status === 'error') setShowLogs(true);
         }
-      } catch (e) {}
+      } catch (e) { /* transient; the next tick retries */ }
     }, 1500);
     return () => clearInterval(interval);
-  }, [polling]);
+  }, [polling, refreshLogs]);
+
+  useEffect(() => {
+    if (showLogs) logEndRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [logs, showLogs]);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
@@ -107,24 +154,23 @@ export default function Ingest() {
   const progressColor = pipelineStatus?.status === 'error' ? 'var(--accent-critical)'
     : pipelineStatus?.status === 'completed' ? 'var(--accent-green)' : undefined;
 
-  // Derived from the real progress checkpoints the backend reports
-  // (clear=5, parse=10, validate=20, enrich=30, load=40, ML analysis=50→99, done=100).
-  const progress = pipelineStatus?.progress || 0;
-  const errored = pipelineStatus?.status === 'error';
-  const steps = [
-    { name: 'PARSE & VALIDATE', detail: 'schema + records', min: 0, max: 20 },
-    { name: 'ENRICH', detail: 'GeoIP lookup', min: 20, max: 30 },
-    { name: 'LOAD', detail: 'DuckDB insert', min: 30, max: 40 },
-    { name: 'ML ANALYSIS', detail: 'graph · cluster · score · explain', min: 40, max: 100 },
-  ].map((s, i, arr) => {
-    const nextMin = arr[i + 1]?.min ?? 100;
-    let status = 'pending';
-    if (pipelineStatus?.status === 'completed') status = 'done';
-    else if (errored && progress >= s.min) status = progress < nextMin ? 'error' : 'done';
-    else if (progress >= nextMin) status = 'done';
-    else if (progress >= s.min && pipelineStatus?.status === 'running') status = 'active';
-    return { ...s, status, icon: status === 'done' ? 'check' : status === 'error' ? 'close' : status === 'active' ? 'circleDot' : 'circle' };
-  });
+  // The backend reports the stage it is in and the state of every stage, so
+  // the tracker mirrors what actually happened. It used to be inferred from
+  // the progress percentage alone — and since a failure reset progress to 0,
+  // every failure was attributed to the first step. A run that died in the
+  // ML stage displayed a red cross on "PARSE & VALIDATE", which is a lie the
+  // operator then has to spend time disproving.
+  const ICONS = {
+    done: 'check', error: 'close', running: 'circleDot',
+    skipped: 'circle', pending: 'circle',
+  };
+  const steps = (pipelineStatus?.stages?.length ? pipelineStatus.stages : []).map((s) => ({
+    key: s.key,
+    name: s.label.toUpperCase(),
+    detail: s.detail || STAGE_HINTS[s.key] || '',
+    status: s.status,
+    icon: ICONS[s.status] || 'circle',
+  }));
 
   return (
     <div className="page-content fade-in">
@@ -161,12 +207,13 @@ export default function Ingest() {
       {(pipelineStatus?.status === 'running' || pipelineStatus?.status === 'completed' || pipelineStatus?.status === 'error') && (
         <div className="step-tracker">
           {steps.map(s => (
-            <div className="step-tracker-item" key={s.name}>
+            <div className="step-tracker-item" key={s.key}>
               <div className="step-tracker-col">
                 <div className={`step-circle ${s.status}`}><Icon name={s.icon} size={15} /></div>
                 <span className="step-name" style={{
-                  color: s.status === 'done' ? 'var(--accent-green)' : s.status === 'active' ? 'var(--accent-elevated)'
-                    : s.status === 'error' ? 'var(--accent-critical)' : 'var(--text-tertiary)',
+                  color: s.status === 'done' ? 'var(--accent-green)'
+                    : s.status === 'running' ? 'var(--accent-elevated)'
+                      : s.status === 'error' ? 'var(--accent-critical)' : 'var(--text-tertiary)',
                 }}>{s.name}</span>
                 <span className="step-detail">{s.detail}</span>
               </div>
@@ -269,6 +316,71 @@ export default function Ingest() {
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginTop: 'var(--space-sm)' }}>
             {pipelineStatus.message}
           </div>
+
+          {pipelineStatus.status === 'error' && (
+            <div className="pipeline-error">
+              <div className="pipeline-error-head">
+                <Icon name="alertTriangle" size={14} />
+                <span>
+                  Failed during <b>{pipelineStatus.stage || 'startup'}</b>
+                  {pipelineStatus.error_type ? ` — ${pipelineStatus.error_type}` : ''}
+                </span>
+              </div>
+              {pipelineStatus.error && <p className="pipeline-error-msg">{pipelineStatus.error}</p>}
+              {pipelineStatus.traceback && (
+                <>
+                  <button className="btn btn-outline btn-sm" onClick={() => setShowTrace((v) => !v)}>
+                    <Icon name={showTrace ? 'chevronUp' : 'chevronDown'} size={12} />
+                    {showTrace ? ' Hide traceback' : ' Show traceback'}
+                  </button>
+                  {showTrace && <pre className="pipeline-trace">{pipelineStatus.traceback}</pre>}
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="pipeline-log-controls">
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() => {
+                const next = !showLogs;
+                setShowLogs(next);
+                if (next) refreshLogs(pipelineStatus.run_id);
+              }}
+            >
+              <Icon name={showLogs ? 'chevronUp' : 'chevronDown'} size={12} />
+              {showLogs ? ' Hide server log' : ' Show server log'}
+            </button>
+            {showLogs && (
+              <button className="btn btn-outline btn-sm" onClick={() => refreshLogs(pipelineStatus.run_id)}>
+                <Icon name="refresh" size={12} /> Refresh
+              </button>
+            )}
+            {showLogs && logFile && <code className="pipeline-log-path">{logFile}</code>}
+          </div>
+
+          {showLogs && (
+            <div className="pipeline-log">
+              {logs.length === 0 && (
+                <div className="pipeline-log-empty">
+                  No log records for this run yet.
+                </div>
+              )}
+              {logs.map((r, i) => (
+                <div className="pipeline-log-line" key={`${r.ts}-${i}`}>
+                  <span className="pipeline-log-ts">{r.ts?.slice(11, 23) || ''}</span>
+                  <span className="pipeline-log-level" style={{ color: LEVEL_COLOR[r.level] }}>
+                    {r.level}
+                  </span>
+                  <span className="pipeline-log-msg">
+                    {r.message}
+                    {r.traceback && <pre className="pipeline-trace">{r.traceback}</pre>}
+                  </span>
+                </div>
+              ))}
+              <div ref={logEndRef} />
+            </div>
+          )}
 
           {pipelineStatus.status === 'completed' && pipelineStatus.summary && (
             <div className="ingest-summary-grid" style={{ marginTop: 'var(--space-lg)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-md)' }}>
