@@ -98,6 +98,8 @@ function ask(message, timeoutMs = 20000) {
 }
 
 export const getCacheStatus = () => ask({ type: 'CACHE_STATUS' });
+/** Every stored response for one API path, newest first. */
+export const matchStoredPath = (path) => ask({ type: 'MATCH_PATH', path }, 10000);
 export const clearApiCache = () => ask({ type: 'CLEAR_API_CACHE' });
 export const prefetchApi = (urls) => ask({ type: 'PREFETCH_API', urls }, 120000);
 

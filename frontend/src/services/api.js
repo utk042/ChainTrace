@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { demoAdapter, isDemoMode } from './demoAdapter';
+import { offlineFallback, clearOfflineMemo } from './offlineFallback';
 
 export const getApiBaseUrl = () => {
   try {
@@ -60,6 +61,9 @@ api.interceptors.response.use(
     const cachedAt = response.headers?.['x-chaintrace-cached-at'] || null;
     response.fromCache = hit;
     response.cachedAt = hit ? cachedAt : null;
+    // The backend answered, so anything the offline path is holding is now
+    // the older copy of two.
+    if (!hit) clearOfflineMemo();
     setProvenance({
       source: isDemoMode() ? 'snapshot' : hit ? 'cache' : 'live',
       cachedAt: response.cachedAt,
@@ -67,7 +71,36 @@ api.interceptors.response.use(
     });
     return response;
   },
-  (error) => Promise.reject(error),
+  async (error) => {
+    // A response — 404, 500, anything the backend actually said — is an
+    // answer, and stored data must never be used to paper over it. Only a
+    // read that never reached a server falls back.
+    if (error.response || isDemoMode()) return Promise.reject(error);
+
+    let fallback = null;
+    try { fallback = await offlineFallback(error.config); } catch { /* no worker */ }
+    if (!fallback) return Promise.reject(error);
+
+    const response = {
+      data: fallback.body,
+      status: 200,
+      statusText: 'OK (stored)',
+      headers: {
+        'x-chaintrace-cache': 'hit',
+        'x-chaintrace-cached-at': fallback.cachedAt || '',
+      },
+      config: error.config,
+      request: error.request,
+      fromCache: true,
+      cachedAt: fallback.cachedAt || null,
+    };
+    setProvenance({
+      source: 'cache',
+      cachedAt: response.cachedAt,
+      at: new Date().toISOString(),
+    });
+    return response;
+  },
 );
 
 // ─── Dashboard ───────────────────────────────────────────────
@@ -141,6 +174,13 @@ export const removeSeedWallet = (address) =>
 export { isDemoMode, setDemoMode, preloadSnapshot } from './demoAdapter';
 
 /**
+ * How many rows of each table to pull down for offline use. High enough to
+ * hold the datasets this tool is built for whole, and bounded by the
+ * routers' own `page_size` ceiling of 10,000.
+ */
+export const OFFLINE_TABLE_ROWS = 5000;
+
+/**
  * The reads worth having stored before going offline: everything a first
  * pass over a case touches. Used by Settings -> "Save for offline".
  */
@@ -150,11 +190,25 @@ export const OFFLINE_PREFETCH_PATHS = [
   '/api/dashboard/timeline?interval=day',
   '/api/dashboard/risk-distribution',
   '/api/dashboard/top-alerts?limit=5',
-  '/api/alerts?page=1&page_size=20',
-  '/api/wallets?page=1&page_size=20',
-  '/api/transactions?page=1&page_size=20&sort_by=timestamp&sort_order=desc',
-  '/api/graph/data?max_nodes=1500&layout=spring',
+  // Whole tables, not the first page of each. The worker keys entries by
+  // their exact URL, so a stored `page_size=20` answered exactly one of the
+  // views the app can ask for and every other page, sort or filter came back
+  // as "not stored" on a device that had the rows. Pulling the tables once
+  // lets services/offlineFallback.js cut any of those views locally.
+  `/api/alerts?page=1&page_size=${OFFLINE_TABLE_ROWS}&sort_by=confidence&sort_order=desc`,
+  `/api/wallets?page=1&page_size=${OFFLINE_TABLE_ROWS}&sort_by=anomaly_score&sort_order=desc`,
+  `/api/transactions?page=1&page_size=${OFFLINE_TABLE_ROWS}&sort_by=timestamp&sort_order=desc`,
+  // Also the exact first view of each table, so the default page is an
+  // outright cache hit rather than a re-slice.
+  '/api/alerts?page=1&page_size=25&sort_by=confidence&sort_order=desc',
+  '/api/wallets?page=1&page_size=25&sort_by=anomaly_score&sort_order=desc',
+  '/api/transactions?page=1&page_size=25&sort_by=timestamp&sort_order=desc',
+  // Param order matters for the same reason: axios serialises the object it
+  // is given, and this is the order the Graph Explorer sends.
+  '/api/graph/data?layout=spring&max_nodes=1500',
   '/api/graph/stats',
+  '/api/graph/clusters',
+  '/api/ingest/status',
   '/api/settings',
   '/api/settings/seed-wallets',
 ];

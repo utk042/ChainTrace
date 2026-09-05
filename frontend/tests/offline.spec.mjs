@@ -81,7 +81,14 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 900 
 const page = await context.newPage();
 
 const errors = [];
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+// "Failed to load resource" is the browser reporting a request that got no
+// answer, which is what being offline *is* — the test drives reads that are
+// not stored verbatim on purpose, so those lines are the expected path, not a
+// fault. Anything the app itself logs or throws still counts.
+const isExpectedOffline = (text) => /Failed to load resource/i.test(text);
+page.on('console', (m) => {
+  if (m.type() === 'error' && !isExpectedOffline(m.text())) errors.push(m.text());
+});
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 
 try {
@@ -132,6 +139,30 @@ try {
     await page.waitForTimeout(route === '/graph' ? 4000 : 1800);
     check(await rendered(page), `OFFLINE ${route} renders`);
   }
+
+  // A view the app never requested while online. The worker keys stored
+  // responses by their exact URL, so paging, sorting or filtering offline used
+  // to miss the cache and render "no stored copy of this query is available"
+  // on a device that was holding every row involved. These now come out of
+  // the stored table, re-cut locally.
+  await page.goto(`${BASE}/wallets`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.waitForTimeout(2500);
+  const firstPage = await page.locator('tbody tr').count();
+  check(firstPage > 0, 'OFFLINE wallets table has rows', `${firstPage} rows`);
+
+  await page.getByRole('button', { name: /Next/ }).first().click({ force: true }).catch(() => {});
+  await page.waitForTimeout(2000);
+  const secondPage = await page.locator('tbody tr').count();
+  const pageLabel = await page.locator('.page-info').first().textContent().catch(() => '');
+  check(secondPage > 0 && /Page 2/.test(pageLabel || ''),
+    'OFFLINE page 2 is served from stored rows', `${secondPage} rows, ${pageLabel?.trim()}`);
+
+  await page.getByRole('button', { name: /^Critical$/ }).first().click({ force: true }).catch(() => {});
+  await page.waitForTimeout(2000);
+  const filtered = await page.locator('tbody tr').count();
+  const failedPanel = await page.locator('.notice-error, .failed').count().catch(() => 0);
+  check(filtered > 0 && failedPanel === 0,
+    'OFFLINE filtering re-runs against stored rows', `${filtered} rows`);
 
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' }).catch(() => {});
   await page.waitForTimeout(3200);

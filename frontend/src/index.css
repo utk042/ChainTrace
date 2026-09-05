@@ -264,7 +264,10 @@ code, pre, .mono { font-family: var(--font-mono); }
 
 .gt-app {
   display: grid;
-  grid-template-rows: var(--titlebar-h) var(--menubar-h) minmax(0, 1fr);
+  /* Title bar, menu bar, workspace, status bar. The status bar is a fixed
+     row rather than page content: it reports the connection state, and a
+     reading that scrolls out of view is one an operator stops checking. */
+  grid-template-rows: var(--titlebar-h) var(--menubar-h) minmax(0, 1fr) var(--statusbar-h);
   height: 100%;
   overflow: hidden;
   background: var(--bg-app);
