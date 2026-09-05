@@ -16,11 +16,17 @@ import Collapse from '../components/ui/Collapse';
 import CopyButton from '../components/ui/CopyButton';
 import { HistogramFacet } from '../components/ui/Histogram';
 import { Loading, Empty, Failed, Notice } from '../components/ui/States';
+import { useSession } from '../state/SessionProvider';
 
 const PAGE_SIZE = 25;
-const TIERS = ['Critical', 'High', 'Elevated', 'Low', 'Normal'];
+const TIERS = ['Critical', 'High', 'Elevated', 'Normal'];
+const PATTERNS = [
+  { key: 'peel_chain', label: 'Peel chain' },
+  { key: 'mixer', label: 'Mixer' },
+  { key: 'watchlist', label: 'Watchlist' },
+];
 
-const EMPTY_FILTERS = { search: '', risk_tier: '', min_score: 0 };
+const EMPTY_FILTERS = { search: '', risk_tier: '', pattern: '', min_score: 0 };
 
 /** Column key -> backend sort column. Only these are sortable server-side. */
 const COLUMNS = [
@@ -55,7 +61,15 @@ const CSV_COLUMNS = [
  */
 export default function Wallets() {
   const navigate = useNavigate();
+  const { openTab } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const handleOpenInGraph = useCallback((address) => {
+    if (!address) return;
+    const targetPath = `/graph?q=${encodeURIComponent(address)}`;
+    openTab('graph', { forceNew: false, path: targetPath });
+    navigate(targetPath);
+  }, [openTab, navigate]);
 
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -92,6 +106,7 @@ export default function Wallets() {
     const params = { page, page_size: PAGE_SIZE, sort_by: sort.by, sort_order: sort.order };
     if (search.trim()) params.search = search.trim();
     if (filters.risk_tier) params.risk_tier = filters.risk_tier;
+    if (filters.pattern) params.pattern = filters.pattern;
     if (filters.min_score > 0) params.min_score = filters.min_score;
     return params;
   }, [page, sort, search, filters]);
@@ -194,7 +209,7 @@ export default function Wallets() {
     ...(detail ? {
       'selection.clear': () => select(null),
       'selection.copy': () => navigator.clipboard?.writeText(detail.address),
-      'open.graph': () => navigate(`/graph?q=${encodeURIComponent(detail.address)}`),
+      'open.graph': () => handleOpenInGraph(detail.address),
     } : {}),
   });
 
@@ -212,26 +227,30 @@ export default function Wallets() {
   // a summary of the whole table.
   const facets = useMemo(() => {
     const tiers = new Map();
-    const patterns = { 'Peel chain': 0, 'Mixer contact': 0, 'Near watchlist': 0 };
+    const patternCounts = { peel_chain: 0, mixer: 0, watchlist: 0 };
     rows.forEach((w) => {
       const tier = w.risk_tier || 'Normal';
       tiers.set(tier, (tiers.get(tier) || 0) + 1);
-      if (w.peel_chain_role === 'chain') patterns['Peel chain'] += 1;
-      if (w.mixer_interaction_count > 0) patterns['Mixer contact'] += 1;
-      if (w.darknet_proximity_hops != null) patterns['Near watchlist'] += 1;
+      if (w.peel_chain_role === 'chain' || (w.peel_chain_depth && w.peel_chain_depth > 0)) patternCounts.peel_chain += 1;
+      if (w.mixer_interaction_count > 0) patternCounts.mixer += 1;
+      if (w.darknet_proximity_hops != null) patternCounts.watchlist += 1;
     });
     return {
       tier: TIERS.filter((t) => tiers.has(t))
         .map((t) => ({ key: t, label: t, count: tiers.get(t), color: riskVar(t) })),
-      patterns: Object.entries(patterns)
-        .filter(([, n]) => n > 0)
-        .map(([label, count]) => ({ key: label, label, count })),
+      patterns: [
+        { key: 'peel_chain', label: 'Peel chain', count: patternCounts.peel_chain },
+        { key: 'mixer', label: 'Mixer contact', count: patternCounts.mixer },
+        { key: 'watchlist', label: 'Near watchlist', count: patternCounts.watchlist },
+      ].filter((p) => p.count > 0),
     };
   }, [rows]);
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const activeFilterCount = (filters.search ? 1 : 0)
-    + (filters.risk_tier ? 1 : 0) + (filters.min_score > 0 ? 1 : 0);
+    + (filters.risk_tier ? 1 : 0)
+    + (filters.pattern ? 1 : 0)
+    + (filters.min_score > 0 ? 1 : 0);
 
   return (
     <div className="page">
@@ -290,7 +309,7 @@ export default function Wallets() {
                 icon="graph"
                 label="Open selection in graph"
                 disabled={!detail}
-                onSelect={() => navigate(`/graph?q=${encodeURIComponent(detail.address)}`)}
+                onSelect={() => handleOpenInGraph(detail.address)}
               />
               <MenuItem
                 close={close}
@@ -337,6 +356,28 @@ export default function Wallets() {
                   >
                     <i className="chip-dot" style={{ background: riskVar(tier) }} />
                     {tier}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="filter-block">
+              <div className="filter-block-title">
+                Detected pattern
+                {filters.pattern && <button className="reset" onClick={() => update({ pattern: '' })}>clear</button>}
+              </div>
+              <div className="chip-row">
+                <button
+                  className={`chip${filters.pattern === '' ? ' selected' : ''}`}
+                  onClick={() => update({ pattern: '' })}
+                >All</button>
+                {PATTERNS.map((p) => (
+                  <button
+                    key={p.key}
+                    className={`chip${filters.pattern === p.key ? ' selected' : ''}`}
+                    onClick={() => update({ pattern: filters.pattern === p.key ? '' : p.key })}
+                  >
+                    {p.label}
                   </button>
                 ))}
               </div>
@@ -394,6 +435,8 @@ export default function Wallets() {
               <HistogramFacet
                 title="Detected patterns"
                 rows={facets.patterns}
+                selected={filters.pattern}
+                onSelect={(key) => update({ pattern: filters.pattern === key ? '' : key })}
                 emptyNote="No behavioural patterns on this page."
               />
             </div>
@@ -511,7 +554,7 @@ export default function Wallets() {
             onTab={setTab}
             onClose={() => select(null)}
             onSelect={select}
-            onOpenGraph={() => navigate(`/graph?q=${encodeURIComponent(selectedAddress)}`)}
+            onOpenGraph={() => handleOpenInGraph(selectedAddress)}
           />
         )}
       />

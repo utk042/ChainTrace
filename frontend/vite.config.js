@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -75,7 +76,7 @@ function chaintraceServiceWorker({ publicDir }) {
  */
 export default defineConfig(({ mode }) => {
   const standalone = mode === 'standalone';
-  const publicDir = new URL('./public', import.meta.url).pathname;
+  const publicDir = fileURLToPath(new URL('./public', import.meta.url));
 
   return {
     plugins: [

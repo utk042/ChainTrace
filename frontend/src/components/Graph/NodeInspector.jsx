@@ -37,6 +37,7 @@ export default function NodeInspector({
   onClose,
   onFocus,
   onExpand,
+  onIsolate,
   onSelectNode,
   onPathFrom,
   onReload,
@@ -96,13 +97,18 @@ export default function NodeInspector({
       )}
 
       <div className="inspector-actions">
-        <button className="btn" onClick={() => onFocus(id)}>
+        <button className="btn" onClick={() => onFocus(id)} title="Centre camera on this node">
           <Icon name="crosshair" size={12} /> Centre
         </button>
-        <button className="btn" onClick={() => onExpand(id)} disabled={expanding}>
+        <button className="btn" onClick={() => onExpand(id)} disabled={expanding} title="Expand 1-hop neighbours">
           <Icon name="expand" size={12} /> {expanding ? 'Expanding…' : 'Expand'}
         </button>
-        <button className="btn" onClick={() => onPathFrom(id)}>
+        {onIsolate && (
+          <button className="btn" onClick={() => onIsolate(id)} title="Isolate ego-network around this node">
+            <Icon name="layers" size={12} /> Isolate
+          </button>
+        )}
+        <button className="btn" onClick={() => onPathFrom(id)} title="Trace connection from this node">
           <Icon name="route" size={12} /> Trace
         </button>
       </div>

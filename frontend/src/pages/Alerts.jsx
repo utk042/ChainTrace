@@ -18,11 +18,24 @@ import Collapse from '../components/ui/Collapse';
 import CopyButton from '../components/ui/CopyButton';
 import { HistogramFacet } from '../components/ui/Histogram';
 import { Loading, Empty, Failed, Notice } from '../components/ui/States';
+import { useSession } from '../state/SessionProvider';
 
 const PAGE_SIZE = 25;
 
 const TIERS = ['Critical', 'High', 'Elevated'];
 const STATUSES = ['pending', 'investigating', 'resolved', 'dismissed'];
+const MODELS = [
+  'Autoencoder',
+  'Peel-Chain',
+  'Mixer-Hub',
+  'CoinJoin',
+  'Risk-Propagation',
+];
+const ENTITY_TYPES = [
+  { key: 'wallet', label: 'Wallet' },
+  { key: 'transaction', label: 'Transaction' },
+  { key: 'ip', label: 'IP address' },
+];
 
 const CSV_COLUMNS = [
   ['alert_id', 'Alert ID'], ['entity_id', 'Entity ID'], ['entity_type', 'Entity type'],
@@ -55,7 +68,15 @@ const EMPTY_FILTERS = {
  */
 export default function Alerts() {
   const navigate = useNavigate();
+  const { openTab } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const handleOpenInGraph = useCallback((entityId) => {
+    if (!entityId) return;
+    const targetPath = `/graph?q=${encodeURIComponent(entityId)}`;
+    openTab('graph', { forceNew: false, path: targetPath });
+    navigate(targetPath);
+  }, [openTab, navigate]);
 
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -249,7 +270,7 @@ export default function Alerts() {
     ...(detail ? {
       'selection.clear': clearSelection,
       'selection.copy': () => navigator.clipboard?.writeText(detail.entity_id),
-      'open.graph': () => navigate(`/graph?q=${encodeURIComponent(detail.entity_id)}`),
+      'open.graph': () => handleOpenInGraph(detail.entity_id),
     } : {}),
   });
 
@@ -351,7 +372,7 @@ export default function Alerts() {
                 icon="graph"
                 label="Open selection in graph"
                 disabled={!detail}
-                onSelect={() => navigate(`/graph?q=${encodeURIComponent(detail.entity_id)}`)}
+                onSelect={() => handleOpenInGraph(detail.entity_id)}
               />
               <MenuItem
                 close={close}
@@ -448,7 +469,12 @@ export default function Alerts() {
             </div>
 
             <div className="filter-block">
-              <div className="filter-block-title">Entity type</div>
+              <div className="filter-block-title">
+                Entity type
+                {filters.entity_type && (
+                  <button className="reset" onClick={() => update({ entity_type: '' })}>clear</button>
+                )}
+              </div>
               <select
                 className="select"
                 value={filters.entity_type}
@@ -456,14 +482,19 @@ export default function Alerts() {
                 aria-label="Entity type"
               >
                 <option value="">Any type</option>
-                {facets.entity.map((f) => (
-                  <option key={f.key} value={f.key}>{f.label}</option>
+                {ENTITY_TYPES.map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
                 ))}
               </select>
             </div>
 
             <div className="filter-block">
-              <div className="filter-block-title">Model</div>
+              <div className="filter-block-title">
+                Model
+                {filters.model && (
+                  <button className="reset" onClick={() => update({ model: '' })}>clear</button>
+                )}
+              </div>
               <select
                 className="select"
                 value={filters.model}
@@ -471,8 +502,8 @@ export default function Alerts() {
                 aria-label="Model"
               >
                 <option value="">Any model</option>
-                {facets.model.map((f) => (
-                  <option key={f.key} value={f.key}>{f.label}</option>
+                {MODELS.map((m) => (
+                  <option key={m} value={m}>{m}</option>
                 ))}
               </select>
             </div>
@@ -610,7 +641,7 @@ export default function Alerts() {
             onClose={clearSelection}
             onStatus={setStatus}
             statusBusy={statusBusy}
-            onOpenGraph={() => navigate(`/graph?q=${encodeURIComponent(detail.entity_id)}`)}
+            onOpenGraph={() => handleOpenInGraph(detail.entity_id)}
           />
         )}
       />

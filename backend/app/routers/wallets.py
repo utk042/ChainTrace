@@ -39,6 +39,7 @@ def _row_to_wallet(r) -> dict:
 def list_wallets(
     search: Optional[str] = None,
     risk_tier: Optional[str] = None,
+    pattern: Optional[str] = None,
     min_score: float = 0.0,
     sort_by: str = "anomaly_score",
     sort_order: str = "desc",
@@ -57,6 +58,13 @@ def list_wallets(
         if risk_tier:
             conditions.append("risk_tier = ?")
             params.append(risk_tier)
+        if pattern:
+            if pattern == "peel_chain":
+                conditions.append("peel_chain_depth > 0")
+            elif pattern == "mixer":
+                conditions.append("mixer_interaction_count > 0")
+            elif pattern == "watchlist":
+                conditions.append("darknet_proximity_hops IS NOT NULL")
         if min_score > 0:
             conditions.append("anomaly_score >= ?")
             params.append(min_score)

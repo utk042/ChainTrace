@@ -16,6 +16,7 @@ import Collapse from '../components/ui/Collapse';
 import CopyButton from '../components/ui/CopyButton';
 import { HistogramFacet } from '../components/ui/Histogram';
 import { Loading, Empty, Failed, Notice } from '../components/ui/States';
+import { useSession } from '../state/SessionProvider';
 
 const PAGE_SIZE = 25;
 
@@ -46,12 +47,21 @@ const CSV_COLUMNS = [
  */
 export default function Transactions() {
   const navigate = useNavigate();
+  const { openTab } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const handleOpenInGraph = useCallback((txid) => {
+    if (!txid) return;
+    const targetPath = `/graph?q=${encodeURIComponent(txid)}`;
+    openTab('graph', { forceNew: false, path: targetPath });
+    navigate(targetPath);
+  }, [openTab, navigate]);
 
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
+  const [scriptType, setScriptType] = useState('');
   const [sort, setSort] = useState({ by: 'timestamp', order: 'desc' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -71,8 +81,9 @@ export default function Transactions() {
   const query = useMemo(() => {
     const params = { page, page_size: PAGE_SIZE, sort_by: sort.by, sort_order: sort.order };
     if (search.trim()) params.search = search.trim();
+    if (scriptType) params.script_type = scriptType;
     return params;
-  }, [page, sort, search]);
+  }, [page, sort, search, scriptType]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -165,7 +176,7 @@ export default function Transactions() {
     ...(detail ? {
       'selection.clear': () => select(null),
       'selection.copy': () => navigator.clipboard?.writeText(detail.txid),
-      'open.graph': () => navigate(`/graph?q=${encodeURIComponent(detail.txid)}`),
+      'open.graph': () => handleOpenInGraph(detail.txid),
     } : {}),
   });
 
@@ -258,7 +269,7 @@ export default function Transactions() {
                 icon="graph"
                 label="Open selection in graph"
                 disabled={!detail}
-                onSelect={() => navigate(`/graph?q=${encodeURIComponent(detail.txid)}`)}
+                onSelect={() => handleOpenInGraph(detail.txid)}
               />
             </>
           )}
@@ -306,6 +317,28 @@ export default function Transactions() {
             </div>
 
             <div className="filter-block">
+              <div className="filter-block-title">
+                Script type
+                {scriptType && (
+                  <button className="reset" onClick={() => { setScriptType(''); setPage(1); }}>clear</button>
+                )}
+              </div>
+              <select
+                className="select"
+                value={scriptType}
+                onChange={(e) => { setScriptType(e.target.value); setPage(1); }}
+                aria-label="Script type"
+              >
+                <option value="">All script types</option>
+                <option value="P2PKH">P2PKH</option>
+                <option value="P2SH">P2SH</option>
+                <option value="P2WPKH">P2WPKH</option>
+                <option value="P2WSH">P2WSH</option>
+                <option value="P2TR">P2TR</option>
+              </select>
+            </div>
+
+            <div className="filter-block">
               <div className="prop-list">
                 <div className="prop-row">
                   <span className="prop-label">Output volume</span>
@@ -319,7 +352,15 @@ export default function Transactions() {
             </div>
 
             <div title="Counted from the transactions currently loaded, not from the whole ledger">
-              <HistogramFacet title="Script type" rows={summary.scripts} />
+              <HistogramFacet
+                title="Script type"
+                rows={summary.scripts}
+                selected={scriptType}
+                onSelect={(key) => {
+                  setScriptType((prev) => (prev === key ? '' : key));
+                  setPage(1);
+                }}
+              />
               <HistogramFacet
                 title="Source country"
                 rows={summary.countries}
@@ -420,7 +461,7 @@ export default function Transactions() {
             onTab={setTab}
             onClose={() => select(null)}
             onOpenAddress={(address) => navigate(`/wallets?address=${encodeURIComponent(address)}`)}
-            onOpenGraph={() => navigate(`/graph?q=${encodeURIComponent(selectedTxid)}`)}
+            onOpenGraph={() => handleOpenInGraph(selectedTxid)}
           />
         )}
       />
