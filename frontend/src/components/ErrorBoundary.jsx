@@ -27,25 +27,28 @@ export default class ErrorBoundary extends Component {
     if (!error) return this.props.children;
 
     return (
-      <div className="page-content fade-in">
-        <div className="card" style={{ maxWidth: 680 }}>
-          <div className="card-header">
-            <span className="card-title" style={{ color: 'var(--accent-critical)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Icon name="alertTriangle" size={14} /> This page failed to render
-            </span>
-          </div>
-          <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 'var(--space-md)' }}>
-            The rest of the app is unaffected — the navigation still works, and
-            nothing that was loaded has been lost. If this repeats on the same
-            page, the detail below is what to report.
-          </p>
-          <pre style={{
-            background: 'var(--bg-tertiary)', padding: 'var(--space-md)', borderRadius: 'var(--radius-sm)',
-            fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', overflowX: 'auto', marginBottom: 'var(--space-lg)',
-          }}>{String(error?.stack || error)}</pre>
-          <button className="btn btn-primary" onClick={() => this.setState({ error: null })}>
-            <Icon name="refresh" size={13} /> Retry this page
-          </button>
+      <div className="page">
+        <div className="page-scroll">
+          <section className="panel" style={{ flex: 'none', maxWidth: 760 }}>
+            <header className="panel-header">
+              <span className="panel-title" style={{ color: 'var(--risk-critical)' }}>
+                <Icon name="alertTriangle" size={13} /> This view failed to render
+              </span>
+            </header>
+            <div className="panel-body pad col" style={{ gap: 'var(--space-md)' }}>
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                The rest of the workstation is unaffected — the rail and menus still
+                work, and nothing already loaded has been lost. If this repeats on the
+                same view, the detail below is what to report.
+              </p>
+              <pre className="trace">{String(error?.stack || error)}</pre>
+              <div className="row">
+                <button className="btn btn-primary" onClick={() => this.setState({ error: null })}>
+                  <Icon name="refresh" size={12} /> Retry this view
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     );

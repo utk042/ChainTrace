@@ -3,6 +3,27 @@ import { SigmaContainer, useLoadGraph, useSigma, useRegisterEvents } from '@reac
 import Graph from 'graphology';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { CANVAS, nodeColor, edgeColor } from '../../theme';
+import { NodeTileProgram } from './nodeRenderer';
+import { glyphFor } from './nodeGlyphs';
+
+/**
+ * Tiles have to stay big enough for their pictogram to read. Degree still
+ * drives the size — a hub should still look like one — but over a range that
+ * cannot shrink a node into an unidentifiable speck.
+ */
+const tileSize = (raw) => Math.max(6, Math.min(13, raw || 6));
+
+/**
+ * Addresses are 34-62 characters. Printed in full under every node they
+ * overlap into an unreadable mat, which is most of what made the old canvas
+ * look like noise. Gotham labels are short names; this is the nearest
+ * equivalent for an identifier.
+ */
+function nodeLabel(value) {
+  if (!value) return '';
+  const text = String(value);
+  return text.length <= 18 ? text : `${text.slice(0, 8)}…${text.slice(-6)}`;
+}
 
 /**
  * The Sigma canvas and everything that talks to the Sigma instance directly:
@@ -14,16 +35,23 @@ import { CANVAS, nodeColor, edgeColor } from '../../theme';
  */
 
 const SIGMA_SETTINGS = {
+  // Square pictogram tiles with the label underneath, as in the Gotham graph
+  // application. See nodeRenderer.js.
+  defaultNodeType: 'tile',
+  nodeProgramClasses: { tile: NodeTileProgram },
   defaultNodeColor: CANVAS.highlight,
   defaultEdgeColor: CANVAS.edge,
   labelColor: { color: CANVAS.label },
   labelFont: "'IBM Plex Mono', ui-monospace, monospace",
-  labelSize: 10,
+  labelSize: 11,
   labelWeight: '500',
-  labelDensity: 0.25,
+  // Sparser than the default: labels now sit under their node rather than
+  // beside it, so two neighbours competing for the same strip of canvas
+  // collide head-on instead of merely crowding.
+  labelDensity: 0.16,
   // Label only nodes large enough on screen to read; otherwise a
   // 1,500-node graph draws every address at once.
-  labelRenderedSizeThreshold: 7,
+  labelRenderedSizeThreshold: 9,
   renderEdgeLabels: false,
   enableEdgeEvents: false,
   zIndex: true,
@@ -38,30 +66,6 @@ const SIGMA_SETTINGS = {
   // which happens when the canvas mounts ahead of layout. The ResizeObserver
   // below corrects the size a frame later.
   allowInvalidContainer: true,
-  // The stock hover renderer paints a light chip behind the label, which on
-  // this palette renders as white-on-white.
-  defaultDrawNodeHover: (context, data, settings) => {
-    const size = settings.labelSize;
-    const font = settings.labelFont;
-    const weight = settings.labelWeight;
-    if (!data.label) return;
-
-    context.font = `${weight} ${size}px ${font}`;
-    const width = context.measureText(data.label).width + 10;
-    const x = Math.round(data.x + data.size + 4);
-    const y = Math.round(data.y - size / 2 - 3);
-
-    context.fillStyle = CANVAS.hoverBg;
-    context.strokeStyle = CANVAS.hoverBorder;
-    context.lineWidth = 1;
-    context.beginPath();
-    context.rect(x, y, width, size + 8);
-    context.fill();
-    context.stroke();
-
-    context.fillStyle = CANVAS.hoverText;
-    context.fillText(data.label, x + 5, y + size + 1);
-  },
 };
 
 // Above this many neighbours, let Sigma's density rules pick the labels
@@ -87,9 +91,10 @@ function GraphLoader({ graphData, onGraphLoaded }) {
       graph.addNode(node.id, {
         x: typeof node.x === 'number' ? node.x : Math.random() * 1000 - 500,
         y: typeof node.y === 'number' ? node.y : Math.random() * 1000 - 500,
-        size: node.size || 4,
-        baseSize: node.size || 4,
-        label: node.label || node.id,
+        size: tileSize(node.size),
+        baseSize: tileSize(node.size),
+        label: nodeLabel(node.label || node.id),
+        image: glyphFor(node.node_type),
         color: nodeColor(node.node_type, node.risk_tier),
         baseColor: nodeColor(node.node_type, node.risk_tier),
         node_type: node.node_type,
@@ -106,9 +111,10 @@ function GraphLoader({ graphData, onGraphLoaded }) {
       graph.addEdgeWithKey(edge.id, edge.source, edge.target, {
         color: edgeColor(edge.edge_type),
         baseColor: edgeColor(edge.edge_type),
-        // Edge widths sit under 1px at rest: at this node count the edges are
-        // context, and anything thicker reads as a solid mat of colour.
-        size: Math.min(1.6, 0.4 + (edge.weight || 1) * 0.15),
+        // Tiles are larger than the old discs and cover more of the link, so
+        // an edge thin enough to disappear behind them leaves a dense cluster
+        // reading as a heap of unconnected squares.
+        size: Math.min(2, 0.9 + (edge.weight || 1) * 0.15),
         edge_type: edge.edge_type,
       });
     });
@@ -327,7 +333,7 @@ function Controller({ controlRef, onLayoutRunning }) {
         out.width = first.width;
         out.height = first.height;
         const ctx = out.getContext('2d');
-        ctx.fillStyle = '#07080a';
+        ctx.fillStyle = CANVAS.background;
         ctx.fillRect(0, 0, out.width, out.height);
         order.forEach((layer) => {
           if (canvases[layer]) ctx.drawImage(canvases[layer], 0, 0);
@@ -363,9 +369,10 @@ function Controller({ controlRef, onLayoutRunning }) {
           graph.addNode(node.id, {
             x: (anchor?.x || 0) + Math.cos(angle) * radius,
             y: (anchor?.y || 0) + Math.sin(angle) * radius,
-            size: node.size || 4,
-            baseSize: node.size || 4,
-            label: node.label || node.id,
+            size: tileSize(node.size),
+            baseSize: tileSize(node.size),
+            label: nodeLabel(node.label || node.id),
+            image: glyphFor(node.node_type),
             color: nodeColor(node.node_type, node.risk_tier),
             baseColor: nodeColor(node.node_type, node.risk_tier),
             node_type: node.node_type,
@@ -383,7 +390,7 @@ function Controller({ controlRef, onLayoutRunning }) {
           graph.addEdge(edge.source, edge.target, {
             color: edgeColor(edge.edge_type),
             baseColor: edgeColor(edge.edge_type),
-            size: 0.6,
+            size: 0.9,
             edge_type: edge.edge_type,
           });
         });

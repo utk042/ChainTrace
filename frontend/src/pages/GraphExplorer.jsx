@@ -4,11 +4,19 @@ import '@react-sigma/core/lib/style.css';
 import GraphCanvas from '../components/Graph/GraphCanvas';
 import NodeInspector from '../components/Graph/NodeInspector';
 import Icon from '../components/Icon';
-import { TYPE_LEGEND, RISK_LEGEND } from '../theme';
+import Tabs from '../components/ui/Tabs';
+import Menu, { MenuItem, MenuSeparator, MenuHeading } from '../components/ui/Menu';
+import { HistogramGroup, HistogramRow } from '../components/ui/Histogram';
+import { Empty } from '../components/ui/States';
+import { useResizablePane } from '../hooks/useResizablePane';
+import { useCommands } from '../services/commands';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { TYPE_LEGEND, RISK_LEGEND, RISK_COLORS, TYPE_COLORS } from '../theme';
+import { shortId, fmtInt } from '../services/format';
 import { saveUrl, saveBlob, fileStamp } from '../services/download';
 import {
   getGraphData, getSubgraph, searchGraph,
-  getNodeDetail, getNeighbors, findPath,
+  getNodeDetail, getNeighbors, findPath, getClusters,
 } from '../services/api';
 
 const NODE_TYPES = TYPE_LEGEND;
@@ -21,11 +29,17 @@ const LAYOUTS = [
 
 const DEFAULT_TYPES = { wallet: true, transaction: true, ip: true };
 
-function shortId(id, head = 10, tail = 8) {
-  if (!id || id.length <= head + tail + 1) return id;
-  return `${id.slice(0, head)}…${id.slice(-tail)}`;
-}
-
+/**
+ * Link analysis over the entity graph, laid out as the Gotham Graph
+ * application: a grouped toolbar, a find box floating over a dot-grid
+ * canvas, canvas furniture along the bottom, and a right-hand panel that
+ * switches between the histogram of what is drawn and the record for what
+ * is selected.
+ *
+ * The histogram is computed from the nodes actually on the canvas, and its
+ * rows are filter controls — so the figure beside a type is always the
+ * number of that type you are looking at, never a stale total.
+ */
 export default function GraphExplorer() {
   const [graphData, setGraphData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -38,8 +52,8 @@ export default function GraphExplorer() {
   const [hovered, setHovered] = useState(null);
   const [expanding, setExpanding] = useState(false);
 
-  // A ?q= on the URL is how the global search box in the top bar hands an
-  // identifier to this page, and it makes a search shareable as a link.
+  // A ?q= on the URL is how global search hands an identifier to this page,
+  // and it makes a search shareable as a link.
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState(() => searchParams.get('q') || '');
   const [results, setResults] = useState([]);
@@ -48,7 +62,12 @@ export default function GraphExplorer() {
   const [types, setTypes] = useState(DEFAULT_TYPES);
   const [minScore, setMinScore] = useState(0);
   const [layout, setLayout] = useState('spring');
-  const [panel, setPanel] = useState(null);      // 'filters' | 'legend' | 'keys' | null
+  const [panel, setPanel] = useState(null);      // 'filters' | 'path' | 'keys' | null
+  const [sideTab, setSideTab] = useState('summary');
+  // Below this width the side panel overlays the canvas, so it must not
+  // start open — it would hide the graph on load.
+  const narrow = useMediaQuery('(max-width: 860px)');
+  const [showSide, setShowSide] = useState(!narrow);
 
   const [pathSource, setPathSource] = useState(null);
   const [pathQuery, setPathQuery] = useState('');
@@ -56,12 +75,17 @@ export default function GraphExplorer() {
   const [pathBusy, setPathBusy] = useState(false);
 
   const [liveStats, setLiveStats] = useState(null);
+  const [clusters, setClusters] = useState([]);
   const [relayouting, setRelayouting] = useState(false);
   const [toast, setToast] = useState(null);
 
   const control = useRef({});
   const searchInput = useRef(null);
   const focusAfterLoad = useRef(null);
+
+  const { width: sideWidth, splitterProps } = useResizablePane('graph-side', {
+    initial: 300, min: 250, max: 520, edge: 'right',
+  });
 
   const filters = useMemo(() => ({ types, minScore }), [types, minScore]);
 
@@ -91,23 +115,16 @@ export default function GraphExplorer() {
     setError(null);
     setEmptyReason(null);
     try {
-      const res = await getGraphData({
-        layout: opts.layout || layout,
-        max_nodes: 1500,
-      });
+      const res = await getGraphData({ layout: opts.layout || layout, max_nodes: 1500 });
       const data = res.data || {};
       setGraphData(data);
-      if (!data.nodes?.length) {
-        setEmptyReason(data.reason || 'The graph is empty.');
-      }
+      if (!data.nodes?.length) setEmptyReason(data.reason || 'The graph is empty.');
     } catch (e) {
-      // A frontend with no backend and a backend with no data look
-      // identical on a blank canvas but need different fixes.
-      setError(
-        e.response
-          ? `Backend returned ${e.response.status} for /api/graph/data.`
-          : 'Cannot reach the backend. Check the API URL in Settings.',
-      );
+      // A frontend with no backend and a backend with no data look identical
+      // on a blank canvas but need different fixes.
+      setError(e.response
+        ? `The backend returned ${e.response.status} for /api/graph/data.`
+        : 'Cannot reach the backend. Check the API URL in Settings.');
       setGraphData({ nodes: [], edges: [], stats: {} });
     } finally {
       setLoading(false);
@@ -116,12 +133,19 @@ export default function GraphExplorer() {
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Clusters are a separate, optional read: the panel says so when the
+  // backend has not computed any rather than showing an empty group.
+  useEffect(() => {
+    getClusters().then((res) => setClusters(res.data || [])).catch(() => setClusters([]));
+  }, [graphData]);
+
   // ── Selection ───────────────────────────────────────────────────
   const selectNode = useCallback(async (nodeId, { center = true } = {}) => {
     setSelected(nodeId);
     setDetail({ id: nodeId, node_type: null });
     setDetailLoading(true);
-    // Selection centres the node at a readable zoom.
+    setSideTab('selection');
+    setShowSide(true);
     if (center) control.current.focusOn?.(nodeId);
     try {
       const res = await getNodeDetail(nodeId);
@@ -148,6 +172,7 @@ export default function GraphExplorer() {
   const clearSelection = useCallback(() => {
     setSelected(null);
     setDetail(null);
+    setSideTab('summary');
   }, []);
 
   // ── Search ──────────────────────────────────────────────────────
@@ -167,7 +192,7 @@ export default function GraphExplorer() {
     if (query.trim().length < 2) {
       setResults([]);
       setSearchMatches(new Set());
-      return;
+      return undefined;
     }
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -186,16 +211,15 @@ export default function GraphExplorer() {
 
   // ── Actions ─────────────────────────────────────────────────────
   const handleExpand = useCallback(async (nodeId) => {
+    if (!nodeId) return;
     setExpanding(true);
     try {
       const res = await getNeighbors(nodeId, 60);
       const added = control.current.addFragment?.(res.data, nodeId) || 0;
       setLiveStats(control.current.getStats?.());
-      flash(
-        added > 0
-          ? `Added ${added} connected ${added === 1 ? 'entity' : 'entities'}${res.data.truncated ? ` (of ${res.data.total_neighbors})` : ''}.`
-          : 'All neighbours are already on the canvas.',
-      );
+      flash(added > 0
+        ? `Added ${added} connected ${added === 1 ? 'entity' : 'entities'}${res.data.truncated ? ` (of ${res.data.total_neighbors})` : ''}.`
+        : 'All neighbours are already on the canvas.');
     } catch {
       flash('Could not expand this node.');
     } finally {
@@ -207,10 +231,7 @@ export default function GraphExplorer() {
     setLoading(true);
     try {
       const res = await getSubgraph(nodeId, hops);
-      if (!res.data?.nodes?.length) {
-        flash('No subgraph available for that entity.');
-        return;
-      }
+      if (!res.data?.nodes?.length) { flash('No subgraph available for that entity.'); return; }
       focusAfterLoad.current = nodeId;
       setGraphData(res.data);
       setEmptyReason(null);
@@ -282,6 +303,29 @@ export default function GraphExplorer() {
     return flash('Graph exported as JSON.');
   }, [graphData, flash]);
 
+  useEffect(() => { if (narrow) setShowSide(false); }, [narrow]);
+
+  // ── Menu bar commands ───────────────────────────────────────────
+  useCommands({
+    reload: () => load(),
+    'export.png': exportPng,
+    'export.json': exportJson,
+    'find.focus': () => searchInput.current?.focus(),
+    'filters.clear': () => { setTypes(DEFAULT_TYPES); setMinScore(0); },
+    'panel.filters': () => setPanel((p) => (p === 'filters' ? null : 'filters')),
+    'panel.summary': () => { setShowSide((v) => !v); setSideTab('summary'); },
+    'panel.detail': () => { setShowSide(true); setSideTab('selection'); },
+    'graph.fit': () => control.current.fit?.(),
+    'graph.relayout': () => control.current.relayout?.(),
+    'help.shortcuts': () => setPanel((p) => (p === 'keys' ? null : 'keys')),
+    ...(selected ? {
+      'graph.expand': () => handleExpand(selected),
+      'graph.path': () => startPath(selected),
+      'selection.clear': clearSelection,
+      'selection.copy': () => navigator.clipboard?.writeText(selected),
+    } : {}),
+  });
+
   // ── Keyboard shortcuts ──────────────────────────────────────────
   useEffect(() => {
     const onKey = (e) => {
@@ -320,92 +364,166 @@ export default function GraphExplorer() {
     return () => window.removeEventListener('keydown', onKey);
   }, [selected, handleExpand, handleReset, clearSelection]);
 
+  // ── Histogram over what is actually drawn ───────────────────────
+  const drawn = useMemo(() => {
+    const nodes = graphData?.nodes || [];
+    const visible = nodes.filter((n) => (
+      types[n.node_type] !== false && (n.anomaly_score || 0) >= minScore
+    ));
+    const byType = new Map();
+    const byTier = new Map();
+    visible.forEach((n) => {
+      byType.set(n.node_type, (byType.get(n.node_type) || 0) + 1);
+      const tier = n.risk_tier || 'Normal';
+      byTier.set(tier, (byTier.get(tier) || 0) + 1);
+    });
+    return { visible, byType, byTier };
+  }, [graphData, types, minScore]);
+
   const stats = graphData?.stats || {};
   const shownNodes = liveStats?.nodes ?? stats.total_nodes ?? 0;
   const shownEdges = liveStats?.edges ?? stats.total_edges ?? 0;
   const activeFilters = Object.values(types).filter(Boolean).length < 3 || minScore > 0;
 
+  const typeMax = Math.max(...NODE_TYPES.map((t) => drawn.byType.get(t.key) || 0), 1);
+  const tierRows = ['Critical', 'High', 'Elevated', 'Low', 'Normal']
+    .filter((t) => drawn.byTier.has(t))
+    .map((t) => ({ tier: t, count: drawn.byTier.get(t) }));
+  const tierMax = Math.max(...tierRows.map((r) => r.count), 1);
+
   return (
-    <div className="graph-page">
+    <div className={`graph-page${showSide ? '' : ' no-side'}`} style={{ '--graph-panel-w': `${sideWidth}px` }}>
       {/* ── Toolbar ─────────────────────────────────────────────── */}
       <div className="graph-toolbar">
-        <div className="graph-search">
-          <Icon name="search" size={14} style={{ opacity: 0.5 }} />
-          <input
-            ref={searchInput}
-            type="text"
-            placeholder="Search address, txid or IP…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          {query && (
-            <button className="icon-btn" onClick={() => setQuery('')} title="Clear">
-              <Icon name="close" size={13} />
+        <div className="tool-group">
+          <span className="tool-group-label">View</span>
+          <div className="tool-group-items">
+            <button className="tool-btn" onClick={() => control.current.fit?.()} title="Fit to view (F)">
+              <Icon name="crosshair" size={13} /> <span>Fit</span>
             </button>
-          )}
-          <kbd>/</kbd>
-
-          {results.length > 0 && (
-            <div className="graph-search-results">
-              {results.map((r) => (
-                <button key={r.id} onClick={() => { selectNode(r.id); setQuery(''); }}>
-                  <span className={`legend-dot ${r.node_type}`} />
-                  <code>{shortId(r.id, 12, 8)}</code>
-                  <span className="graph-search-meta">
-                    {r.risk_tier && <em className={`badge ${r.risk_tier.toLowerCase()}`}>{r.risk_tier}</em>}
-                    {r.degree != null && `${r.degree} links`}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
+            <button className="tool-btn" onClick={() => control.current.zoomIn?.()} title="Zoom in (+)">
+              <Icon name="plus" size={13} />
+            </button>
+            <button className="tool-btn" onClick={() => control.current.zoomOut?.()} title="Zoom out (−)">
+              <Icon name="minus" size={13} />
+            </button>
+          </div>
         </div>
 
-        <div className="graph-toolbar-actions">
-          <button
-            className={`tool-btn${activeFilters ? ' active' : ''}`}
-            onClick={() => setPanel(panel === 'filters' ? null : 'filters')}
-            title="Filters"
-          >
-            <Icon name="filter" size={14} /> <span>Filters</span>
-            {activeFilters && <i className="tool-dot" />}
-          </button>
+        <div className="tool-group">
+          <span className="tool-group-label">Organise</span>
+          <div className="tool-group-items">
+            <select
+              className="tool-select"
+              value={layout}
+              onChange={(e) => { setLayout(e.target.value); load({ layout: e.target.value }); }}
+              title="Layout computed on the server"
+              aria-label="Server layout"
+            >
+              {LAYOUTS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+            </select>
+            <button
+              className="tool-btn"
+              onClick={() => control.current.relayout?.()}
+              disabled={relayouting}
+              title="Re-run the force layout on what is currently drawn (L)"
+            >
+              <Icon name="layers" size={13} /> <span>{relayouting ? 'Laying out…' : 'Re-layout'}</span>
+            </button>
+            <button className="tool-btn" onClick={handleReset} title="Reset view and filters (R)">
+              <Icon name="rotateCcw" size={13} /> <span>Reset</span>
+            </button>
+          </div>
+        </div>
 
-          <select
-            className="tool-select"
-            value={layout}
-            onChange={(e) => { setLayout(e.target.value); load({ layout: e.target.value }); }}
-            title="Server layout"
-          >
-            {LAYOUTS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
-          </select>
+        <div className="tool-group">
+          <span className="tool-group-label">Filter</span>
+          <div className="tool-group-items">
+            <button
+              className={`tool-btn${panel === 'filters' ? ' active' : ''}`}
+              onClick={() => setPanel(panel === 'filters' ? null : 'filters')}
+              title="Node type and score filters"
+            >
+              <Icon name="filter" size={13} /> <span>Filters</span>
+              {activeFilters && <i className="tool-dot" />}
+            </button>
+          </div>
+        </div>
 
-          <button className="tool-btn" onClick={() => control.current.relayout?.()}
-                  disabled={relayouting} title="Re-run force layout on the current view (L)">
-            <Icon name="layers" size={14} /> <span>{relayouting ? 'Laying out…' : 'Re-layout'}</span>
-          </button>
+        <div className="tool-group">
+          <span className="tool-group-label">Selection</span>
+          <div className="tool-group-items">
+            <button
+              className="tool-btn"
+              disabled={!selected || expanding}
+              onClick={() => handleExpand(selected)}
+              title="Add the selected node's neighbours (E)"
+            >
+              <Icon name="expand" size={13} /> <span>Expand</span>
+            </button>
+            <button
+              className={`tool-btn${panel === 'path' ? ' active' : ''}`}
+              disabled={!selected}
+              onClick={() => startPath(selected)}
+              title="Trace the shortest connection from the selected node"
+            >
+              <Icon name="route" size={13} /> <span>Trace</span>
+            </button>
+            <button
+              className="tool-btn"
+              disabled={!selected}
+              onClick={() => handleIsolate(selected, 2)}
+              title="Redraw the canvas as this node's two-hop neighbourhood"
+            >
+              <Icon name="crosshair" size={13} /> <span>Isolate</span>
+            </button>
+          </div>
+        </div>
 
-          <div className="tool-divider" />
+        <span className="page-toolbar-spacer" />
 
-          <button className="tool-btn" onClick={() => control.current.fit?.()} title="Fit to view (F)">
-            <Icon name="crosshair" size={14} /> <span>Fit</span>
-          </button>
-          <button className="tool-btn" onClick={handleReset} title="Reset everything (R)">
-            <Icon name="rotateCcw" size={14} /> <span>Reset</span>
-          </button>
-
-          <div className="tool-divider" />
-
-          <button className="tool-btn" onClick={exportPng} title="Export PNG">
-            <Icon name="image" size={14} />
-          </button>
-          <button className="tool-btn" onClick={exportJson} title="Export JSON">
-            <Icon name="download" size={14} />
-          </button>
-          <button className={`tool-btn${panel === 'keys' ? ' active' : ''}`}
-                  onClick={() => setPanel(panel === 'keys' ? null : 'keys')} title="Shortcuts">
-            <Icon name="info" size={14} />
-          </button>
+        <div className="tool-group">
+          <span className="tool-group-label">Panel</span>
+          <div className="tool-group-items">
+            <button
+              className={`tool-btn${showSide ? ' active' : ''}`}
+              onClick={() => setShowSide((v) => !v)}
+              title="Show or hide the side panel"
+            >
+              <Icon name="panelRight" size={13} />
+            </button>
+            <button
+              className={`tool-btn${panel === 'keys' ? ' active' : ''}`}
+              onClick={() => setPanel(panel === 'keys' ? null : 'keys')}
+              title="Keyboard shortcuts"
+            >
+              <Icon name="info" size={13} />
+            </button>
+            <Menu
+              align="right"
+              trigger={({ toggle, open }) => (
+                <button className={`tool-btn${open ? ' active' : ''}`} onClick={toggle} title="Export">
+                  <Icon name="download" size={13} /> <span>Export</span>
+                </button>
+              )}
+            >
+              {({ close }) => (
+                <>
+                  <MenuHeading>{fmtInt(shownNodes)} nodes on canvas</MenuHeading>
+                  <MenuItem close={close} icon="image" label="Export canvas as PNG" onSelect={exportPng} />
+                  <MenuItem close={close} icon="boxDown" label="Export graph as JSON" onSelect={exportJson} />
+                  <MenuSeparator />
+                  <MenuItem
+                    close={close}
+                    icon="copy"
+                    label="Copy selected identifier"
+                    disabled={!selected}
+                    onSelect={() => navigator.clipboard?.writeText(selected)}
+                  />
+                </>
+              )}
+            </Menu>
+          </div>
         </div>
       </div>
 
@@ -427,6 +545,42 @@ export default function GraphExplorer() {
           onLayoutRunning={setRelayouting}
         />
 
+        {/* Find box, floating over the canvas as in the Graph application. */}
+        <div className="graph-find">
+          <div className="graph-find-input">
+            <Icon name="search" size={13} />
+            <input
+              ref={searchInput}
+              type="text"
+              placeholder="Find artifacts, objects and links…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Find in graph"
+            />
+            {query && (
+              <button className="icon-btn" onClick={() => setQuery('')} title="Clear" aria-label="Clear search">
+                <Icon name="close" size={12} />
+              </button>
+            )}
+            <kbd>/</kbd>
+          </div>
+
+          {results.length > 0 && (
+            <div className="graph-find-results">
+              {results.map((r) => (
+                <button key={r.id} onClick={() => { selectNode(r.id); setQuery(''); }} title={r.id}>
+                  <span className={`legend-dot ${r.node_type}`} />
+                  <code>{shortId(r.id, 14, 8)}</code>
+                  <span className="graph-find-meta">
+                    {r.risk_tier && <span className={`badge ${r.risk_tier.toLowerCase()}`}>{r.risk_tier}</span>}
+                    {r.degree != null && <span>{r.degree} links</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Overlay, never a branch that unmounts the canvas. */}
         {loading && (
           <div className="graph-overlay">
@@ -436,13 +590,13 @@ export default function GraphExplorer() {
         )}
 
         {!loading && (error || emptyReason) && (
-          <div className="graph-overlay graph-overlay-message">
+          <div className="graph-overlay">
             <Icon name={error ? 'alertTriangle' : 'graph'} size={26} />
             <h3>{error ? 'Backend unreachable' : 'Nothing to display'}</h3>
             <p>{error || emptyReason}</p>
             <div className="graph-overlay-actions">
-              <button className="btn btn-outline" onClick={() => load()}>
-                <Icon name="refresh" size={13} /> Retry
+              <button className="btn" onClick={() => load()}>
+                <Icon name="refresh" size={12} /> Retry
               </button>
               <Link className="btn btn-outline" to={error ? '/settings' : '/ingest'}>
                 {error ? 'Open Settings' : 'Go to Ingest'}
@@ -453,30 +607,51 @@ export default function GraphExplorer() {
 
         {/* Filters */}
         {panel === 'filters' && (
-          <div className="graph-panel graph-panel-left">
-            <header>
-              <Icon name="filter" size={13} /> Filters
-              <button className="icon-btn" onClick={() => setPanel(null)}><Icon name="close" size={13} /></button>
+          <div className="graph-float">
+            <header className="panel-header">
+              <span className="panel-title"><Icon name="filter" size={12} /> Filters</span>
+              <span className="panel-header-actions">
+                <button className="icon-btn" onClick={() => setPanel(null)} aria-label="Close filters">
+                  <Icon name="close" size={12} />
+                </button>
+              </span>
             </header>
-            <div className="graph-panel-body">
-              {NODE_TYPES.map((t) => (
-                <label key={t.key} className="filter-check">
-                  <input
-                    type="checkbox"
-                    checked={types[t.key]}
-                    onChange={() => setTypes((p) => ({ ...p, [t.key]: !p[t.key] }))}
-                  />
-                  <span className="legend-dot" style={{ background: t.color }} />
-                  {t.label}
-                </label>
-              ))}
-              <div className="filter-slider">
-                <span>Minimum anomaly score<b>{minScore}</b></span>
-                <input type="range" min="0" max="100" step="5"
-                       value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} />
+            <div className="graph-float-body">
+              <div className="col">
+                {NODE_TYPES.map((t) => (
+                  <label key={t.key} className="check">
+                    <input
+                      type="checkbox"
+                      checked={types[t.key]}
+                      onChange={() => setTypes((p) => ({ ...p, [t.key]: !p[t.key] }))}
+                    />
+                    <i className="legend-dot" style={{ background: t.color }} />
+                    <span>{t.label}</span>
+                    <span className="muted mono" style={{ marginLeft: 'auto' }}>
+                      {fmtInt(drawn.byType.get(t.key) || 0)}
+                    </span>
+                  </label>
+                ))}
               </div>
-              <button className="btn btn-outline" style={{ width: '100%' }}
-                      onClick={() => { setTypes(DEFAULT_TYPES); setMinScore(0); }}>
+
+              <div className="col">
+                <span className="field-label">Minimum anomaly score</span>
+                <div className="slider-control">
+                  <input
+                    type="range" min="0" max="100" step="5"
+                    value={minScore}
+                    onChange={(e) => setMinScore(Number(e.target.value))}
+                    aria-label="Minimum anomaly score"
+                  />
+                  <span className="slider-value">{minScore}</span>
+                </div>
+              </div>
+
+              <button
+                className="btn btn-block"
+                onClick={() => { setTypes(DEFAULT_TYPES); setMinScore(0); }}
+                disabled={!activeFilters}
+              >
                 Clear filters
               </button>
             </div>
@@ -485,19 +660,24 @@ export default function GraphExplorer() {
 
         {/* Path finder */}
         {panel === 'path' && (
-          <div className="graph-panel graph-panel-left">
-            <header>
-              <Icon name="route" size={13} /> Trace connection
-              <button className="icon-btn" onClick={() => setPanel(null)}><Icon name="close" size={13} /></button>
+          <div className="graph-float">
+            <header className="panel-header">
+              <span className="panel-title"><Icon name="route" size={12} /> Trace connection</span>
+              <span className="panel-header-actions">
+                <button className="icon-btn" onClick={() => setPanel(null)} aria-label="Close">
+                  <Icon name="close" size={12} />
+                </button>
+              </span>
             </header>
-            <div className="graph-panel-body">
+            <div className="graph-float-body">
               <div className="path-endpoint">
-                <span>FROM</span>
-                <code>{shortId(pathSource, 12, 8)}</code>
+                <span>From</span>
+                <code title={pathSource}>{shortId(pathSource, 14, 10)}</code>
               </div>
               <div className="path-endpoint">
-                <span>TO</span>
+                <span>To</span>
                 <input
+                  className="input"
                   type="text"
                   placeholder="Paste an address, txid or IP"
                   value={pathQuery}
@@ -505,8 +685,11 @@ export default function GraphExplorer() {
                   onKeyDown={(e) => e.key === 'Enter' && handlePathSearch()}
                 />
               </div>
-              <button className="btn btn-primary" style={{ width: '100%' }}
-                      onClick={handlePathSearch} disabled={pathBusy || !pathQuery.trim()}>
+              <button
+                className="btn btn-primary btn-block"
+                onClick={handlePathSearch}
+                disabled={pathBusy || !pathQuery.trim()}
+              >
                 {pathBusy ? 'Searching…' : 'Find shortest path'}
               </button>
 
@@ -516,9 +699,9 @@ export default function GraphExplorer() {
                   <ol>
                     {pathResult.path.map((n, i) => (
                       <li key={n.id}>
-                        <button onClick={() => selectNode(n.id)}>
+                        <button onClick={() => selectNode(n.id)} title={n.id}>
                           <span className={`legend-dot ${n.node_type}`} />
-                          <code>{shortId(n.id, 8, 6)}</code>
+                          <code>{shortId(n.id, 10, 6)}</code>
                         </button>
                         {i < pathResult.hops.length && (
                           <em>{pathResult.hops[i].edge_type?.replace(/_/g, ' ')}</em>
@@ -529,7 +712,7 @@ export default function GraphExplorer() {
                 </div>
               )}
               {pathResult && !pathResult.found && (
-                <p className="inspector-note">{pathResult.reason}</p>
+                <p className="inspector-note" style={{ padding: 0 }}>{pathResult.reason}</p>
               )}
             </div>
           </div>
@@ -537,29 +720,35 @@ export default function GraphExplorer() {
 
         {/* Shortcuts */}
         {panel === 'keys' && (
-          <div className="graph-panel graph-panel-left">
-            <header>
-              <Icon name="info" size={13} /> Shortcuts
-              <button className="icon-btn" onClick={() => setPanel(null)}><Icon name="close" size={13} /></button>
+          <div className="graph-float">
+            <header className="panel-header">
+              <span className="panel-title"><Icon name="info" size={12} /> Keyboard shortcuts</span>
+              <span className="panel-header-actions">
+                <button className="icon-btn" onClick={() => setPanel(null)} aria-label="Close">
+                  <Icon name="close" size={12} />
+                </button>
+              </span>
             </header>
-            <div className="graph-panel-body shortcut-list">
-              {[
-                ['/', 'Focus search'],
-                ['F', 'Fit graph to view'],
-                ['R', 'Reset view and filters'],
-                ['L', 'Re-run force layout'],
-                ['E', 'Expand selected node'],
-                ['C', 'Centre selected node'],
-                ['+ / −', 'Zoom in / out'],
-                ['Esc', 'Clear selection'],
-              ].map(([k, d]) => (
-                <div key={k}><kbd>{k}</kbd><span>{d}</span></div>
-              ))}
+            <div className="graph-float-body">
+              <div className="shortcut-list">
+                {[
+                  ['/', 'Focus find'],
+                  ['F', 'Fit graph to view'],
+                  ['R', 'Reset view and filters'],
+                  ['L', 'Re-run force layout'],
+                  ['E', 'Expand selected node'],
+                  ['C', 'Centre selected node'],
+                  ['+ / −', 'Zoom in / out'],
+                  ['Esc', 'Clear selection'],
+                ].map(([k, d]) => (
+                  <div key={k}><kbd>{k}</kbd><span>{d}</span></div>
+                ))}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Legend + stats */}
+        {/* Canvas furniture */}
         <div className="graph-footer">
           <div className="graph-legend">
             {NODE_TYPES.map((t) => (
@@ -574,43 +763,139 @@ export default function GraphExplorer() {
               </span>
             ))}
           </div>
-          <div className="graph-stats">
-            {shownNodes.toLocaleString()} nodes · {shownEdges.toLocaleString()} edges
+          <div className="graph-count">
+            {fmtInt(shownNodes)} nodes · {fmtInt(shownEdges)} edges
             {stats.cluster_count ? ` · ${stats.cluster_count} clusters` : ''}
             {stats.truncated && (
-              <span className="graph-stats-warn" title="Only the most connected part of the graph is drawn">
-                {' '}· sample of {stats.graph_total_nodes?.toLocaleString()}
+              <span className="graph-count-warn" title="Only the most connected part of the graph is drawn">
+                {' '}· sample of {fmtInt(stats.graph_total_nodes)}
               </span>
             )}
           </div>
         </div>
 
-        {/* Zoom controls */}
         <div className="graph-zoom">
-          <button onClick={() => control.current.zoomIn?.()} title="Zoom in (+)"><Icon name="plus" size={14} /></button>
-          <button onClick={() => control.current.zoomOut?.()} title="Zoom out (−)"><Icon name="minus" size={14} /></button>
-          <button onClick={() => control.current.fit?.()} title="Fit (F)"><Icon name="crosshair" size={14} /></button>
+          <button onClick={() => control.current.zoomIn?.()} title="Zoom in (+)" aria-label="Zoom in">
+            <Icon name="plus" size={13} />
+          </button>
+          <button onClick={() => control.current.zoomOut?.()} title="Zoom out (−)" aria-label="Zoom out">
+            <Icon name="minus" size={13} />
+          </button>
+          <button onClick={() => control.current.fit?.()} title="Fit (F)" aria-label="Fit to view">
+            <Icon name="crosshair" size={13} />
+          </button>
         </div>
 
-        {toast && <div className="graph-toast">{toast}</div>}
+        {toast && <div className="toast" role="status">{toast}</div>}
       </div>
 
-      {/* ── Inspector ───────────────────────────────────────────── */}
-      {detail && (
-        <NodeInspector
-          detail={detail}
-          loading={detailLoading}
-          expanding={expanding}
-          onClose={clearSelection}
-          onFocus={(id) => control.current.focusOn?.(id)}
-          onExpand={handleExpand}
-          onSelectNode={(id) => {
-            if (control.current.hasNode?.(id)) selectNode(id);
-            else handleIsolate(id, 1);
-          }}
-          onPathFrom={startPath}
-          onReload={() => { clearSelection(); load(); }}
-        />
+      {/* ── Side panel ──────────────────────────────────────────── */}
+      {showSide && (
+        <aside className="graph-side" style={{ position: 'relative' }}>
+          <div {...splitterProps} className={`${splitterProps.className} splitter-edge`} />
+          <Tabs
+            active={sideTab}
+            onChange={setSideTab}
+            tabs={[
+              { key: 'summary', label: 'Histogram' },
+              { key: 'selection', label: 'Selection', count: selected ? 1 : undefined },
+            ]}
+          />
+
+          {sideTab === 'summary' && (
+            <div className="browser-scroll">
+              <HistogramGroup title="Object types" total={fmtInt(drawn.visible.length)}>
+                {NODE_TYPES.map((t) => (
+                  <HistogramRow
+                    key={t.key}
+                    label={t.label}
+                    color={TYPE_COLORS[t.key]}
+                    count={drawn.byType.get(t.key) || 0}
+                    max={typeMax}
+                    selected={types[t.key] === false ? false : undefined}
+                    onSelect={() => setTypes((p) => ({ ...p, [t.key]: !p[t.key] }))}
+                    title={`${t.label}: ${fmtInt(drawn.byType.get(t.key) || 0)} drawn — click to ${types[t.key] ? 'hide' : 'show'}`}
+                  />
+                ))}
+              </HistogramGroup>
+
+              <HistogramGroup title="Risk tier" total={fmtInt(drawn.visible.length)}>
+                {tierRows.length === 0 ? (
+                  <div className="histogram-empty">No scored nodes on the canvas.</div>
+                ) : tierRows.map((r) => (
+                  <HistogramRow
+                    key={r.tier}
+                    label={r.tier}
+                    color={RISK_COLORS[r.tier]}
+                    count={r.count}
+                    max={tierMax}
+                  />
+                ))}
+              </HistogramGroup>
+
+              <HistogramGroup title="Clusters" total={fmtInt(clusters.length)} defaultOpen={false}>
+                {clusters.length === 0 ? (
+                  <div className="histogram-empty">
+                    The backend has not computed any wallet clusters for this dataset.
+                  </div>
+                ) : clusters.slice(0, 20).map((c) => (
+                  <HistogramRow
+                    key={c.cluster_id}
+                    label={`Cluster ${c.cluster_id}`}
+                    count={c.wallet_count}
+                    max={Math.max(...clusters.map((x) => x.wallet_count), 1)}
+                    onSelect={c.wallets?.[0] ? () => selectNode(c.wallets[0]) : undefined}
+                    title={`${c.wallet_count} wallets · ${c.tx_count} transactions`}
+                  />
+                ))}
+              </HistogramGroup>
+
+              <div className="section-label">Canvas</div>
+              <div className="prop-list">
+                <div className="prop-row">
+                  <span className="prop-label">Nodes drawn</span>
+                  <span className="prop-value mono">{fmtInt(shownNodes)}</span>
+                </div>
+                <div className="prop-row">
+                  <span className="prop-label">Edges drawn</span>
+                  <span className="prop-value mono">{fmtInt(shownEdges)}</span>
+                </div>
+                <div className="prop-row">
+                  <span className="prop-label">Passing filters</span>
+                  <span className="prop-value mono">{fmtInt(drawn.visible.length)}</span>
+                </div>
+                <div className="prop-row">
+                  <span className="prop-label">Layout</span>
+                  <span className="prop-value">{LAYOUTS.find((l) => l.key === layout)?.label}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {sideTab === 'selection' && (
+            detail ? (
+              <NodeInspector
+                detail={detail}
+                loading={detailLoading}
+                expanding={expanding}
+                onClose={clearSelection}
+                onFocus={(id) => control.current.focusOn?.(id)}
+                onExpand={handleExpand}
+                onSelectNode={(id) => {
+                  if (control.current.hasNode?.(id)) selectNode(id);
+                  else handleIsolate(id, 1);
+                }}
+                onPathFrom={startPath}
+                onReload={() => { clearSelection(); load(); }}
+              />
+            ) : (
+              <Empty icon="crosshair" title="Nothing selected">
+                Click a node on the canvas, or find one with the search box, to
+                see its record here.
+              </Empty>
+            )
+          )}
+        </aside>
       )}
     </div>
   );

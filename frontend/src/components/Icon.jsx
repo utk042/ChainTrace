@@ -8,7 +8,7 @@
  * spills is silently clipped by the viewBox and renders as a broken glyph.
  * `npm run check:icons` enforces that.
  */
-const PATHS = {
+export const PATHS = {
   // ─── Navigation ───────────────────────────────────────────────
   grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
   alertTriangle: 'M12 3.5 21.5 20h-19zM12 9.5v5M12 17.5h.01',
@@ -68,10 +68,35 @@ const PATHS = {
   link: 'M10 13.5a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7L11.5 6.3M14 10.5a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 0 0 5.7 5.7l1.3-1.3',
   pin: 'M12 21v-7M8.5 4h7l-1 6 2.5 2.5v1.5H7v-1.5L9.5 10z',
   refresh: 'M20 5v6h-6M4 19v-6h6M19.4 9A8 8 0 0 0 5.7 6.3L4 8M4.6 15a8 8 0 0 0 13.7 2.7L20 16',
+
+  // ─── Workstation chrome ───────────────────────────────────────
+  menu: 'M4 7h16M4 12h16M4 17h16',
+  folder: 'M3.5 6.5A1.5 1.5 0 0 1 5 5h3.6l2 2.5H19a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z',
+  briefcase: 'M4 8h16v11H4zM9 8V6.2A1.7 1.7 0 0 1 10.7 4.5h2.6A1.7 1.7 0 0 1 15 6.2V8M4 12.5h16',
+  list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
+  table: 'M4 5h16v14H4zM4 10h16M10 5v14',
+  columns: 'M4 5h16v14H4zM10 5v14M15 5v14',
+  panelRight: 'M4 5h16v14H4zM15 5v14',
+  barChart: 'M4 19.5h16M7 16.5V9.5M12 16.5V5.5M17 16.5v-5',
+  fileText: 'M6.5 3.5h7.5l4 4v13h-11.5zM14 3.5v4h4M9.5 12.5h5M9.5 16h5',
+  terminal: 'M4 5h16v14H4zM8 10l2.5 2L8 14M13.5 15h3.5',
+  sliders: 'M4 8h9M17 8h3M4 16h3M11 16h9M15 5.5v5M9 13.5v5',
+  star: 'M12 4.2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 9.9l5.4-.8z',
+  share: 'M17.5 7.5a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8zM6.5 14.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8zM17.5 21.3a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8zM8.6 10.8l6.8-3.4M8.6 13.2l6.8 3.4',
+  user: 'M12 11.6a3.8 3.8 0 1 0 0-7.6 3.8 3.8 0 0 0 0 7.6zM4.6 20a7.4 7.4 0 0 1 14.8 0',
+  eye: 'M12 6c-4.5 0-8 6-8 6s3.5 6 8 6 8-6 8-6-3.5-6-8-6zM12 14.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8z',
+  save: 'M5 4h11l3 3v13H5zM8.5 4v5h7V4M8.5 20v-6h7v6',
+  sortAsc: 'M12 19.5v-15M6.5 10L12 4.5 17.5 10',
+  sortDesc: 'M12 4.5v15M6.5 14l5.5 5.5 5.5-5.5',
+  arrowRight: 'M4 12h15.5M13.5 6l6 6-6 6',
+  externalLink: 'M13.5 4.5h6v6M19.5 4.5l-8.5 8.5M18 14v4.5A1.5 1.5 0 0 1 16.5 20h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10',
+  moreHorizontal: 'M6 12h.01M12 12h.01M18 12h.01',
+  collapseLeft: 'M11 5.5 5.5 12 11 18.5M19 5.5 13.5 12 19 18.5',
+  collapseRight: 'M13 5.5 18.5 12 13 18.5M5 5.5 10.5 12 5 18.5',
 };
 
 /** Names whose geometry is a solid shape rather than a stroked outline. */
-const FILLED = new Set(['play', 'zap']);
+export const FILLED = new Set(['play', 'zap']);
 
 export const ICON_NAMES = Object.keys(PATHS);
 
