@@ -10,16 +10,23 @@ import { VIEWS, viewForPath } from './views';
 
 const VIEW_BY_KEY = new Map(VIEWS.map((v) => [v.key, v]));
 
+let tabCounter = 1;
+
+function makeTab(view, count = 1) {
+  const id = `tab-${view.key}-${tabCounter++}`;
+  const label = count > 1 ? `${view.label} (${count})` : view.label;
+  return {
+    id,
+    key: view.key,
+    label,
+    path: view.path,
+    icon: view.icon,
+  };
+}
+
 /**
  * The state the workstation chrome needs, held once.
- *
- * Before this, the top bar polled /api/health on its own, the banner polled
- * it again, and the dashboard fetched the same counters a third time — three
- * requests describing one backend, free to disagree with each other on
- * screen. There is now one health poll, one set of counters, and one place
- * that knows which views are open.
  */
-
 const SessionContext = createContext(null);
 
 export function useSession() {
@@ -34,8 +41,6 @@ export function SessionProvider({ children }) {
   const navigate = useNavigate();
 
   const demo = isDemoMode();
-  // Snapshot mode answers /api/health from bundled data, which would
-  // otherwise report a healthy backend that isn't there.
   const status = demo ? 'demo' : backend.status;
 
   const [stats, setStats] = useState(null);
@@ -49,8 +54,6 @@ export function SessionProvider({ children }) {
       setStats(res.data);
       setStatsError(null);
     } catch (e) {
-      // An em dash on every counter reads as "nothing ingested". When the
-      // figures are missing because the request failed, say which.
       setStats(null);
       setStatsError(e.response
         ? `The backend returned ${e.response.status} for /api/dashboard/stats.`
@@ -60,42 +63,111 @@ export function SessionProvider({ children }) {
     }
   }, []);
 
-  // Refetched whenever the backend's state changes, not once on mount: the
-  // counters used to be read a single time and, if that read failed, every
-  // figure stayed an em dash for the life of the page.
   useEffect(() => {
     if (backend.status === 'checking') return;
     refreshStats();
   }, [backend.status, refreshStats]);
 
-  // Where the data on screen came from — live, service-worker cache, or the
-  // bundled snapshot. A forensic tool must never leave that ambiguous.
   const [provenance, setProvenance] = useState(getProvenance);
   useEffect(() => subscribeProvenance(setProvenance), []);
 
   // ─── Workspace tabs ────────────────────────────────────────────
-  // Navigating opens a view; the tab strip is the set of views open in this
-  // window, exactly as the title bar works on the Gotham workstation.
-  const [openKeys, setOpenKeys] = useState(() => [viewForPath(location.pathname).key]);
-  const activeView = viewForPath(location.pathname);
+  // Each tab is { id, key, label, path, icon }.
+  // Tabs are persistent: switching tabs changes activeTabId and syncs URL,
+  // without unmounting views.
+  const [tabs, setTabs] = useState(() => {
+    const initialView = viewForPath(location.pathname);
+    return [makeTab(initialView)];
+  });
 
+  const [activeTabId, setActiveTabId] = useState(() => tabs[0]?.id || 'tab-overview-1');
+
+  const activeTab = useMemo(
+    () => tabs.find((t) => t.id === activeTabId) || tabs[0],
+    [tabs, activeTabId],
+  );
+
+  const activeView = useMemo(
+    () => VIEW_BY_KEY.get(activeTab?.key) || VIEWS[0],
+    [activeTab],
+  );
+
+  // Sync tab selection if browser back/forward or navigation changes location.pathname
   useEffect(() => {
-    setOpenKeys((keys) => (keys.includes(activeView.key) ? keys : [...keys, activeView.key]));
-  }, [activeView.key]);
+    const view = viewForPath(location.pathname);
+    if (!view) return;
+    const currentActive = tabs.find((t) => t.id === activeTabId);
+    if (currentActive && currentActive.key === view.key) return;
 
-  const closeView = useCallback((key) => {
-    const index = openKeys.indexOf(key);
-    if (index === -1 || openKeys.length <= 1) return;   // never close the last tab
-    const next = openKeys.filter((k) => k !== key);
-    setOpenKeys(next);
-    // Closing the view you are looking at lands on its neighbour rather than
-    // on a blank workspace. Navigation is kept out of the state updater so a
-    // double-invoked render can't route twice.
-    if (key === activeView.key) {
-      const fallback = VIEW_BY_KEY.get(next[Math.min(index, next.length - 1)]);
-      if (fallback) navigate(fallback.path);
+    const existing = tabs.find((t) => t.key === view.key);
+    if (existing) {
+      setActiveTabId(existing.id);
+    } else {
+      const newTab = makeTab(view, 1);
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(newTab.id);
     }
-  }, [openKeys, activeView.key, navigate]);
+  }, [location.pathname, activeTabId, tabs]);
+
+  // Switch to an existing tab
+  const switchTab = useCallback((tabId) => {
+    const target = tabs.find((t) => t.id === tabId);
+    if (target) {
+      setActiveTabId(target.id);
+      navigate(target.path);
+    }
+  }, [tabs, navigate]);
+
+  // Open a tab: if forceNew is true (e.g. from TitleBar '+'), always create a new tab instance
+  // If forceNew is false and tab already exists, switch to it
+  const openTab = useCallback((viewKey, options = {}) => {
+    const { forceNew = false, path } = options;
+    const view = VIEW_BY_KEY.get(viewKey) || VIEWS[0];
+
+    const existing = tabs.filter((t) => t.key === viewKey);
+    if (!forceNew && existing.length > 0) {
+      const target = existing[0];
+      if (path) target.path = path;
+      setActiveTabId(target.id);
+      navigate(path || target.path);
+      return;
+    }
+
+    const count = existing.length + 1;
+    const newTab = makeTab(view, count);
+    if (path) newTab.path = path;
+    setTabs((prevTabs) => [...prevTabs, newTab]);
+    setActiveTabId(newTab.id);
+    navigate(path || newTab.path);
+  }, [tabs, navigate]);
+
+  // Close a tab
+  const closeTab = useCallback((tabId) => {
+    if (tabs.length <= 1) return; // Never close the last tab
+    const index = tabs.findIndex((t) => t.id === tabId);
+    if (index === -1) return;
+
+    const nextTabs = tabs.filter((t) => t.id !== tabId);
+    setTabs(nextTabs);
+
+    if (activeTabId === tabId) {
+      const nextIndex = Math.min(index, nextTabs.length - 1);
+      const fallback = nextTabs[nextIndex];
+      if (fallback) {
+        setActiveTabId(fallback.id);
+        navigate(fallback.path);
+      }
+    }
+  }, [tabs, activeTabId, navigate]);
+
+  // Backward-compatible openKeys
+  const openKeys = useMemo(() => tabs.map((t) => t.key), [tabs]);
+
+  // Backward-compatible closeView
+  const closeView = useCallback((key) => {
+    const matching = tabs.find((t) => t.key === key);
+    if (matching) closeTab(matching.id);
+  }, [tabs, closeTab]);
 
   const value = useMemo(() => ({
     backend,
@@ -106,12 +178,19 @@ export function SessionProvider({ children }) {
     statsLoading,
     refreshStats,
     provenance,
+    tabs,
+    activeTab,
+    activeTabId,
     activeView,
     openKeys,
+    openTab,
+    switchTab,
+    closeTab,
     closeView,
   }), [
     backend, status, demo, stats, statsError, statsLoading, refreshStats,
-    provenance, activeView, openKeys, closeView,
+    provenance, tabs, activeTab, activeTabId, activeView, openKeys,
+    openTab, switchTab, closeTab, closeView,
   ]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

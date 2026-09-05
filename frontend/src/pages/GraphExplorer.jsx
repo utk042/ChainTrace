@@ -78,10 +78,12 @@ export default function GraphExplorer() {
   const [clusters, setClusters] = useState([]);
   const [relayouting, setRelayouting] = useState(false);
   const [toast, setToast] = useState(null);
+  const [isolatedNode, setIsolatedNode] = useState(null);
 
   const control = useRef({});
   const searchInput = useRef(null);
   const focusAfterLoad = useRef(null);
+  const lastHandledQueryRef = useRef(null);
 
   const { width: sideWidth, splitterProps } = useResizablePane('graph-side', {
     initial: 300, min: 250, max: 520, edge: 'right',
@@ -146,7 +148,21 @@ export default function GraphExplorer() {
     setDetailLoading(true);
     setSideTab('selection');
     setShowSide(true);
-    if (center) control.current.focusOn?.(nodeId);
+    if (center) {
+      control.current.focusOn?.(nodeId);
+      requestAnimationFrame(() => {
+        control.current.focusOn?.(nodeId);
+      });
+      setTimeout(() => {
+        control.current.focusOn?.(nodeId);
+      }, 100);
+      setTimeout(() => {
+        control.current.focusOn?.(nodeId);
+      }, 250);
+      setTimeout(() => {
+        control.current.focusOn?.(nodeId);
+      }, 450);
+    }
     try {
       const res = await getNodeDetail(nodeId);
       if (res.data?.found) setDetail(res.data);
@@ -173,20 +189,38 @@ export default function GraphExplorer() {
     setSelected(null);
     setDetail(null);
     setSideTab('summary');
-  }, []);
+    lastHandledQueryRef.current = null;
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.delete('q');
+      return p;
+    }, { replace: true });
+  }, [setSearchParams]);
 
-  // ── Search ──────────────────────────────────────────────────────
-  // Keep the URL in step with the box, so a reload or a shared link lands on
-  // the same search. `replace` keeps typing out of the history stack.
+  // ── URL & Selection sync ────────────────────────────────────────
+  // Responds to ?q=<nodeId> from "Open in graph" or Global Search
   useEffect(() => {
-    const current = searchParams.get('q') || '';
-    const next = query.trim();
-    if (current === next) return;
-    const params = new URLSearchParams(searchParams);
-    if (next) params.set('q', next);
-    else params.delete('q');
-    setSearchParams(params, { replace: true });
-  }, [query, searchParams, setSearchParams]);
+    const q = searchParams.get('q')?.trim();
+    if (!q) {
+      lastHandledQueryRef.current = null;
+      return;
+    }
+    if (loading || !graphData) return;
+
+    if (lastHandledQueryRef.current === q && selected === q) return;
+    lastHandledQueryRef.current = q;
+
+    setQuery(q);
+
+    const hasNode = control.current.hasNode?.(q) || graphData.nodes?.some((n) => n.id === q);
+    if (hasNode) {
+      selectNode(q, { center: true });
+      setTimeout(() => control.current.focusOn?.(q), 100);
+      setTimeout(() => control.current.focusOn?.(q), 300);
+    } else {
+      handleIsolate(q, 2);
+    }
+  }, [searchParams, loading, graphData, selected, selectNode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (query.trim().length < 2) {
@@ -232,9 +266,11 @@ export default function GraphExplorer() {
     try {
       const res = await getSubgraph(nodeId, hops);
       if (!res.data?.nodes?.length) { flash('No subgraph available for that entity.'); return; }
+      setIsolatedNode(nodeId);
       focusAfterLoad.current = nodeId;
       setGraphData(res.data);
       setEmptyReason(null);
+      flash(`Isolated ego-network for ${shortId(nodeId)}.`);
     } catch {
       flash('Could not load that subgraph.');
     } finally {
@@ -242,18 +278,32 @@ export default function GraphExplorer() {
     }
   }, [flash]);
 
+  const handleExitIsolation = useCallback(async () => {
+    setIsolatedNode(null);
+    lastHandledQueryRef.current = null;
+    clearSelection();
+    await load();
+    control.current.fit?.();
+    flash('Exited isolation mode.');
+  }, [clearSelection, load, flash]);
+
   const handleGraphLoaded = useCallback((graph) => {
     setLiveStats({ nodes: graph.order, edges: graph.size });
     const target = focusAfterLoad.current;
     if (target) {
       focusAfterLoad.current = null;
-      // One frame after load, once the node has display coordinates.
-      requestAnimationFrame(() => selectNode(target));
+      requestAnimationFrame(() => {
+        selectNode(target, { center: true });
+        setTimeout(() => control.current.focusOn?.(target), 120);
+        setTimeout(() => control.current.focusOn?.(target), 300);
+      });
     }
   }, [selectNode]);
 
   /** Full reset: original graph, no filters, no selection, camera framed. */
   const handleReset = useCallback(async () => {
+    setIsolatedNode(null);
+    lastHandledQueryRef.current = null;
     setTypes(DEFAULT_TYPES);
     setMinScore(0);
     setQuery('');
@@ -539,44 +589,96 @@ export default function GraphExplorer() {
           pathEdges={pathEdges}
           searchMatches={searchMatches}
           onNodeClick={(id) => selectNode(id)}
+          onNodeDoubleClick={(id) => handleExpand(id)}
           onNodeHover={setHovered}
           onStageClick={clearSelection}
           onGraphLoaded={handleGraphLoaded}
           onLayoutRunning={setRelayouting}
         />
 
-        {/* Find box, floating over the canvas as in the Graph application. */}
-        <div className="graph-find">
-          <div className="graph-find-input">
-            <Icon name="search" size={13} />
-            <input
-              ref={searchInput}
-              type="text"
-              placeholder="Find artifacts, objects and links…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              aria-label="Find in graph"
-            />
-            {query && (
-              <button className="icon-btn" onClick={() => setQuery('')} title="Clear" aria-label="Clear search">
-                <Icon name="close" size={12} />
-              </button>
+        {/* Top bar floating over canvas with find box and isolation banner */}
+        <div className="graph-stage-top">
+          <div className="graph-find">
+            <div className="graph-find-input">
+              <Icon name="search" size={13} />
+              <input
+                ref={searchInput}
+                type="text"
+                placeholder="Find artifacts, objects and links…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const q = query.trim();
+                    if (!q) return;
+                    if (results.length > 0) {
+                      const r = results[0];
+                      setQuery(r.id);
+                      setResults([]);
+                      setSearchParams({ q: r.id }, { replace: true });
+                    } else {
+                      setSearchParams({ q }, { replace: true });
+                    }
+                  }
+                }}
+                aria-label="Find in graph"
+              />
+              {query && (
+                <button
+                  className="icon-btn"
+                  onClick={() => {
+                    setQuery('');
+                    setResults([]);
+                    setSearchMatches(new Set());
+                    setSearchParams((prev) => {
+                      const p = new URLSearchParams(prev);
+                      p.delete('q');
+                      return p;
+                    }, { replace: true });
+                  }}
+                  title="Clear"
+                  aria-label="Clear search"
+                >
+                  <Icon name="close" size={12} />
+                </button>
+              )}
+              <kbd>/</kbd>
+            </div>
+
+            {results.length > 0 && (
+              <div className="graph-find-results">
+                {results.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => {
+                      setQuery(r.id);
+                      setResults([]);
+                      setSearchParams({ q: r.id }, { replace: true });
+                    }}
+                    title={r.id}
+                  >
+                    <span className={`legend-dot ${r.node_type}`} />
+                    <code>{shortId(r.id, 14, 8)}</code>
+                    <span className="graph-find-meta">
+                      {r.risk_tier && <span className={`badge ${r.risk_tier.toLowerCase()}`}>{r.risk_tier}</span>}
+                      {r.degree != null && <span>{r.degree} links</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
             )}
-            <kbd>/</kbd>
           </div>
 
-          {results.length > 0 && (
-            <div className="graph-find-results">
-              {results.map((r) => (
-                <button key={r.id} onClick={() => { selectNode(r.id); setQuery(''); }} title={r.id}>
-                  <span className={`legend-dot ${r.node_type}`} />
-                  <code>{shortId(r.id, 14, 8)}</code>
-                  <span className="graph-find-meta">
-                    {r.risk_tier && <span className={`badge ${r.risk_tier.toLowerCase()}`}>{r.risk_tier}</span>}
-                    {r.degree != null && <span>{r.degree} links</span>}
-                  </span>
-                </button>
-              ))}
+          {isolatedNode && (
+            <div className="isolation-banner">
+              <Icon name="layers" size={13} />
+              <span className="isolation-banner-text">
+                Isolated ego-network for <code className="mono">{shortId(isolatedNode, 14, 10)}</code> ({liveStats?.nodes || 0} nodes, {liveStats?.edges || 0} links)
+              </span>
+              <button type="button" className="btn btn-sm btn-primary" onClick={handleExitIsolation}>
+                <Icon name="close" size={11} /> Exit Isolation
+              </button>
             </div>
           )}
         </div>
@@ -881,6 +983,7 @@ export default function GraphExplorer() {
                 onClose={clearSelection}
                 onFocus={(id) => control.current.focusOn?.(id)}
                 onExpand={handleExpand}
+                onIsolate={handleIsolate}
                 onSelectNode={(id) => {
                   if (control.current.hasNode?.(id)) selectNode(id);
                   else handleIsolate(id, 1);
