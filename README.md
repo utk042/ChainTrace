@@ -272,10 +272,17 @@ npm run check:icons     # icon geometry — runs as part of `npm run build`
 npm run test:unit       # the local filter/sort/paging rules, no browser needed
 npm run build
 npm run test:offline    # the offline-first acceptance test, in a real browser
+npm run test:ui         # menus, dropdowns, shortcuts and chart hover
 
 cd ../backend
 python tests/airgap.py  # the backend with every non-loopback socket refused
 ```
+
+`test:ui` covers the chrome that only misbehaves under a pointer: that a
+dropdown is the app's own and not the operating system's, that a menu paints
+above the icon rail rather than under it, that the keyboard reference opens
+from every view, that the search hint names the modifier this platform
+actually uses, and that a chart tooltip stays inside its panel.
 
 `test:unit` checks `services/localQuery.js` against the routers it mirrors:
 that the filters mean what the SQL means, and that a view cut locally never
@@ -485,6 +492,7 @@ Prototype/
         └── services/
             ├── api.js        # API client + cache-provenance tracking
             ├── commands.js   # Menu-bar command registry (pages register what they can do)
+            ├── platform.js   # Which modifier key this machine actually uses
             ├── format.js     # One definition each for identifier, figure and date display
             ├── demoAdapter.js  # Serves the bundled snapshot through axios
             ├── localQuery.js # Filter/sort/page rules mirroring the routers,

@@ -71,6 +71,15 @@ export function SessionProvider({ children }) {
   const [provenance, setProvenance] = useState(getProvenance);
   useEffect(() => subscribeProvenance(setProvenance), []);
 
+  // ─── Keyboard reference ────────────────────────────────────────
+  // Held here rather than in a page, so Help -> Keyboard shortcuts works
+  // from every tab. It used to be Graph Explorer state, which left the menu
+  // item disabled everywhere else.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
+  const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
+  const toggleShortcuts = useCallback(() => setShortcutsOpen((v) => !v), []);
+
   // ─── Workspace tabs ────────────────────────────────────────────
   // Each tab is { id, key, label, path, icon }.
   // Tabs are persistent: switching tabs changes activeTabId and syncs URL,
@@ -173,6 +182,10 @@ export function SessionProvider({ children }) {
     backend,
     status,
     demo,
+    shortcutsOpen,
+    openShortcuts,
+    closeShortcuts,
+    toggleShortcuts,
     stats,
     statsError,
     statsLoading,
@@ -191,6 +204,7 @@ export function SessionProvider({ children }) {
     backend, status, demo, stats, statsError, statsLoading, refreshStats,
     provenance, tabs, activeTab, activeTabId, activeView, openKeys,
     openTab, switchTab, closeTab, closeView,
+    shortcutsOpen, openShortcuts, closeShortcuts, toggleShortcuts,
   ]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

@@ -174,6 +174,10 @@
   --z-float: 40;
   --z-panel: 60;
   --z-chrome: 120;
+  /* The rail overlays the workspace when it expands on hover, so it sits
+     above panels and page chrome — but below any menu, which is drawn into
+     <body> and must cover everything. */
+  --z-rail: 140;
   --z-dropdown: 200;
   --z-modal: 400;
   --z-toast: 500;
@@ -533,7 +537,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   width: var(--rail-w);
   height: 100%;
   flex-shrink: 0;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-rail);
 }
 
 .rail {
@@ -552,7 +556,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-rail);
   transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1) 0s, box-shadow 0.2s ease 0s;
   white-space: nowrap;
 }
@@ -1017,6 +1021,93 @@ code, pre, .mono { font-family: var(--font-mono); }
 }
 
 .select option { background: var(--bg-well); color: var(--text-primary); }
+
+/* ─── Custom select (components/ui/Select.jsx) ───────────────────── */
+/*
+   The trigger keeps the .select / .tool-select look, so a closed control is
+   indistinguishable from the native one it replaced. It only has to stop
+   painting the CSS arrow, since the component draws a real chevron.
+*/
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  text-align: left;
+  font-family: inherit;
+}
+
+/* The base classes paint an arrow with a background gradient and reserve
+   padding for it. The component draws a real chevron, so both have to go —
+   named against each base class because .tool-select is defined further down
+   the file and would otherwise win on source order, leaving two arrows. */
+.select.select-trigger,
+.tool-select.select-trigger {
+  background-image: none;
+  padding-right: var(--space-sm);
+}
+
+.select-trigger .select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-trigger > svg { flex-shrink: 0; color: var(--text-tertiary); }
+
+.select-trigger.open { border-color: var(--border-focus); }
+
+.select-trigger:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.select-menu { padding: var(--space-xs) 0; }
+
+.select-list { outline: none; }
+
+.select-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 5px var(--space-md) 5px var(--space-sm);
+  background: none;
+  border: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Hover and keyboard focus are the same state, so a pointer and the arrow
+   keys never disagree about which row is about to be chosen. It matches
+   .menu-item's highlight, because this is one of the app's menus. */
+.select-option.active:not(:disabled) {
+  background: var(--accent-strong);
+  color: var(--text-on-accent);
+}
+
+.select-option.active:not(:disabled) .select-option-check { color: var(--text-on-accent); }
+
+.select-option.selected { color: var(--text-primary); }
+
+.select-option:disabled { color: var(--text-muted); }
+
+.select-option:disabled { cursor: not-allowed; }
+
+.select-option-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.select-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 textarea.input { height: auto; padding: var(--space-sm); resize: vertical; line-height: 1.5; }
 
@@ -2380,6 +2471,41 @@ button.stat-tile:hover { background: var(--bg-well); }
 
 .graph-zoom button:last-child { border-bottom: none; }
 .graph-zoom button:hover { background: var(--bg-control); color: var(--text-primary); }
+
+/* ─── Modal (the keyboard reference) ─────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: rgba(0, 0, 0, 0.55);
+  z-index: var(--z-modal);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(80vh, 640px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.modal-body {
+  padding: var(--space-md);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.shortcut-section { display: flex; flex-direction: column; gap: var(--space-sm); }
 
 .shortcut-list { display: flex; flex-direction: column; gap: 5px; }
 

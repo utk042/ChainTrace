@@ -106,7 +106,8 @@ export default function Dashboard() {
 
   const timelineOption = useMemo(() => ({
     backgroundColor: 'transparent',
-    grid: { top: 24, right: 14, bottom: 30, left: 52 },
+    // Room on the right for the alert axis's own labels.
+    grid: { top: 24, right: 40, bottom: 30, left: 52 },
     legend: {
       show: true,
       top: 0,
@@ -127,25 +128,54 @@ export default function Dashboard() {
         color: TEXT.tertiary, fontSize: 10, fontFamily: 'IBM Plex Mono', hideOverlap: true,
       },
     }),
-    yAxis: chartValueAxis({ type: 'value' }),
+    // Two scales, because the two series are orders of magnitude apart: a
+    // period with 150 transactions and 2 alerts drew the alert bar one pixel
+    // tall against a 250-unit axis, so the series the panel exists to
+    // surface was the one you could not see.
+    yAxis: [
+      chartValueAxis({ type: 'value' }),
+      chartValueAxis({
+        type: 'value',
+        splitLine: { show: false },
+        // Alerts are counted, so the ticks are whole numbers. Without this a
+        // period with no alerts gets an axis labelled 0.2, 0.4, 0.6 — units
+        // that cannot exist.
+        minInterval: 1,
+        axisLabel: {
+          color: RISK_COLORS.Critical, fontSize: 10, fontFamily: 'IBM Plex Mono',
+        },
+      }),
+    ],
     series: [
       {
         name: 'Transactions',
         type: 'bar',
         data: timeline.map((t) => t.count),
-        // Volume is the baseline; the alert series on top is the signal.
+        // Volume is the baseline; the alert line over it is the signal.
         itemStyle: { color: 'rgba(45, 114, 210, 0.55)' },
-        barWidth: '58%',
+        // One bar per period, centred in its slot. Two grouped bars put the
+        // visible one off-centre, and the hover highlight — which marks the
+        // whole slot — then sat between it and its neighbour, so a reading
+        // could not be matched to the bar it described.
+        barCategoryGap: '32%',
+        barMaxWidth: 26,
       },
       {
         name: 'Alerts raised',
-        type: 'bar',
+        type: 'line',
+        yAxisIndex: 1,
         data: timeline.map((t) => t.anomaly_count),
         itemStyle: { color: RISK_COLORS.Critical },
-        barWidth: '58%',
+        lineStyle: { color: RISK_COLORS.Critical, width: 1.5 },
+        symbol: 'circle',
+        symbolSize: 4,
+        // A flat line along the floor is a real reading — no alerts in this
+        // period — and showing it beats an invisible bar.
+        showSymbol: timeline.length <= 40,
+        z: 3,
       },
     ],
-    tooltip: chartTooltip({ trigger: 'axis', axisPointer: { type: 'shadow' } }),
+    tooltip: chartTooltip({ trigger: 'axis' }),
   }), [timeline, interval]);
 
   const graphReady = graphStats?.ready;

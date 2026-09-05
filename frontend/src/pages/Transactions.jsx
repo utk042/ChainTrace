@@ -16,6 +16,7 @@ import Collapse from '../components/ui/Collapse';
 import CopyButton from '../components/ui/CopyButton';
 import { HistogramFacet } from '../components/ui/Histogram';
 import { Loading, Empty, Failed, Notice } from '../components/ui/States';
+import Select from '../components/ui/Select';
 import { useSession } from '../state/SessionProvider';
 
 const PAGE_SIZE = 25;
@@ -314,21 +315,18 @@ export default function Transactions() {
           <>
             <div className="filter-block">
               <div className="filter-block-title">Order by</div>
-              <select
-                className="select"
+              <Select
                 value={`${sort.by}:${sort.order}`}
-                onChange={(e) => {
-                  const [by, order] = e.target.value.split(':');
-                  setSort({ by, order });
-                }}
-                aria-label="Sort order"
-              >
-                <option value="timestamp:desc">Newest first</option>
-                <option value="timestamp:asc">Oldest first</option>
-                <option value="fee:desc">Highest fee first</option>
-                <option value="fee:asc">Lowest fee first</option>
-                <option value="txid:asc">TXID, ascending</option>
-              </select>
+                onChange={(v) => { const [by, order] = v.split(':'); setSort({ by, order }); }}
+                ariaLabel="Sort order"
+                options={[
+                  { value: 'timestamp:desc', label: 'Newest first' },
+                  { value: 'timestamp:asc', label: 'Oldest first' },
+                  { value: 'fee:desc', label: 'Highest fee first' },
+                  { value: 'fee:asc', label: 'Lowest fee first' },
+                  { value: 'txid:asc', label: 'TXID, ascending' },
+                ]}
+              />
             </div>
 
             <div className="section-label">
@@ -343,19 +341,19 @@ export default function Transactions() {
                   <button className="reset" onClick={() => { setScriptType(''); setPage(1); }}>clear</button>
                 )}
               </div>
-              <select
-                className="select"
+              <Select
                 value={scriptType}
-                onChange={(e) => { setScriptType(e.target.value); setPage(1); }}
-                aria-label="Script type"
-              >
-                <option value="">All script types</option>
-                <option value="P2PKH">P2PKH</option>
-                <option value="P2SH">P2SH</option>
-                <option value="P2WPKH">P2WPKH</option>
-                <option value="P2WSH">P2WSH</option>
-                <option value="P2TR">P2TR</option>
-              </select>
+                onChange={(v) => { setScriptType(v); setPage(1); }}
+                ariaLabel="Script type"
+                options={[
+                  { value: '', label: 'All script types' },
+                  { value: 'P2PKH', label: 'P2PKH' },
+                  { value: 'P2SH', label: 'P2SH' },
+                  { value: 'P2WPKH', label: 'P2WPKH' },
+                  { value: 'P2WSH', label: 'P2WSH' },
+                  { value: 'P2TR', label: 'P2TR' },
+                ]}
+              />
             </div>
 
             <div className="filter-block">

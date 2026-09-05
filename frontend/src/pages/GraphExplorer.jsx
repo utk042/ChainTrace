@@ -6,10 +6,12 @@ import NodeInspector from '../components/Graph/NodeInspector';
 import Icon from '../components/Icon';
 import Tabs from '../components/ui/Tabs';
 import Menu, { MenuItem, MenuSeparator, MenuHeading } from '../components/ui/Menu';
+import Select from '../components/ui/Select';
 import { HistogramGroup, HistogramRow } from '../components/ui/Histogram';
 import { Empty } from '../components/ui/States';
 import { useResizablePane } from '../hooks/useResizablePane';
 import { useCommands } from '../services/commands';
+import { useSession } from '../state/SessionProvider';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { TYPE_LEGEND, RISK_LEGEND, RISK_COLORS, TYPE_COLORS } from '../theme';
 import { shortId, fmtInt } from '../services/format';
@@ -55,6 +57,7 @@ export default function GraphExplorer() {
   // A ?q= on the URL is how global search hands an identifier to this page,
   // and it makes a search shareable as a link.
   const [searchParams, setSearchParams] = useSearchParams();
+  const { openShortcuts } = useSession();
   const [query, setQuery] = useState(() => searchParams.get('q') || '');
   const [results, setResults] = useState([]);
   const [searchMatches, setSearchMatches] = useState(new Set());
@@ -62,7 +65,7 @@ export default function GraphExplorer() {
   const [types, setTypes] = useState(DEFAULT_TYPES);
   const [minScore, setMinScore] = useState(0);
   const [layout, setLayout] = useState('spring');
-  const [panel, setPanel] = useState(null);      // 'filters' | 'path' | 'keys' | null
+  const [panel, setPanel] = useState(null);      // 'filters' | 'path' | null
   const [sideTab, setSideTab] = useState('summary');
   // Below this width the side panel overlays the canvas, so it must not
   // start open — it would hide the graph on load.
@@ -373,7 +376,6 @@ export default function GraphExplorer() {
     'panel.detail': () => { setShowSide(true); setSideTab('selection'); },
     'graph.fit': () => control.current.fit?.(),
     'graph.relayout': () => control.current.relayout?.(),
-    'help.shortcuts': () => setPanel((p) => (p === 'keys' ? null : 'keys')),
     ...(selected ? {
       'graph.expand': () => handleExpand(selected),
       'graph.path': () => startPath(selected),
@@ -469,15 +471,14 @@ export default function GraphExplorer() {
         <div className="tool-group">
           <span className="tool-group-label">Organise</span>
           <div className="tool-group-items">
-            <select
+            <Select
               className="tool-select"
               value={layout}
-              onChange={(e) => { setLayout(e.target.value); load({ layout: e.target.value }); }}
+              onChange={(v) => { setLayout(v); load({ layout: v }); }}
               title="Layout computed on the server"
-              aria-label="Server layout"
-            >
-              {LAYOUTS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
-            </select>
+              ariaLabel="Server layout"
+              options={LAYOUTS.map((l) => ({ value: l.key, label: l.label }))}
+            />
             <button
               className="tool-btn"
               onClick={() => control.current.relayout?.()}
@@ -549,9 +550,9 @@ export default function GraphExplorer() {
               <Icon name="panelRight" size={13} />
             </button>
             <button
-              className={`tool-btn${panel === 'keys' ? ' active' : ''}`}
-              onClick={() => setPanel(panel === 'keys' ? null : 'keys')}
-              title="Keyboard shortcuts"
+              className="tool-btn"
+              onClick={openShortcuts}
+              title="Keyboard shortcuts (?)"
             >
               <Icon name="info" size={13} />
             </button>
@@ -827,34 +828,6 @@ export default function GraphExplorer() {
         )}
 
         {/* Shortcuts */}
-        {panel === 'keys' && (
-          <div className="graph-float">
-            <header className="panel-header">
-              <span className="panel-title"><Icon name="info" size={12} /> Keyboard shortcuts</span>
-              <span className="panel-header-actions">
-                <button className="icon-btn" onClick={() => setPanel(null)} aria-label="Close">
-                  <Icon name="close" size={12} />
-                </button>
-              </span>
-            </header>
-            <div className="graph-float-body">
-              <div className="shortcut-list">
-                {[
-                  ['/', 'Focus find'],
-                  ['F', 'Fit graph to view'],
-                  ['R', 'Reset view and filters'],
-                  ['L', 'Re-run force layout'],
-                  ['E', 'Expand selected node'],
-                  ['C', 'Centre selected node'],
-                  ['+ / −', 'Zoom in / out'],
-                  ['Esc', 'Clear selection'],
-                ].map(([k, d]) => (
-                  <div key={k}><kbd>{k}</kbd><span>{d}</span></div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Canvas furniture */}
         <div className="graph-footer">
