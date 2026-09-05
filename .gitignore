@@ -28,6 +28,7 @@ MANIFEST
 
 # Virtual Environments
 .venv/
+.venv*/
 venv/
 ENV/
 env/
@@ -81,3 +82,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Offline install bundle (scripts/bundle-offline.sh) — built artefact,
+# ~115 MB of wheels plus a frontend build.
+dist-offline/

@@ -170,9 +170,9 @@ MaxMind database if one is present and degrades to a deterministic fallback
 if not.
 
 The only feature that needs a network is **Ingest → Fetch Real Blockchain
-Data**, which calls Blockstream's public API by definition. It fails with a
-clear message on an air-gapped machine; fetch the data on a connected machine
-and upload the file instead.
+Data**, which calls Blockstream's public API by definition. It answers `502`
+with a clear message on an air-gapped machine; fetch the data on a connected
+machine and upload the file instead.
 
 > Service workers are only allowed on HTTPS or `localhost`. Served over plain
 > HTTP from another host, layers 1 and 2 are unavailable — the Settings panel
@@ -193,6 +193,77 @@ with no server, no install and no network. It carries no service worker —
 left to cache. (The PNG/JSON export buttons need a real browser context;
 everything else works.)
 
+### The whole stack offline
+
+The section above is about the *frontend* surviving a lost connection. The
+backend has a separate question to answer: can the whole product run on a
+machine that has never had internet at all?
+
+It can, and that is checked rather than asserted:
+
+```bash
+cd backend
+python tests/airgap.py          # or CT_LIGHT_MODE=true python tests/airgap.py
+```
+
+The test does not simulate being offline. It replaces `socket.connect`,
+`connect_ex` and `getaddrinfo` with versions that refuse every non-loopback
+address *before importing the app*, then drives the real thing through them:
+generate a dataset, run the full pipeline (parse, validate, GeoIP enrich,
+load, analyse), read every endpoint the frontend calls including the
+entity-level ones, write a setting, and serve the built frontend. Any
+outbound connection attempt is recorded and fails the run, naming the host —
+including one made by a library while its module body executes. That last
+part is the point: a dependency that phones home on import, or a model that
+downloads weights on first use, works perfectly on a developer's laptop and
+fails on the machine this tool exists for.
+
+**One process, one port, no network.** When `frontend/dist` exists the
+backend serves it from its own origin, so there is no second server, no
+nginx, no CORS and no `VITE_API_URL` to configure:
+
+```bash
+cd frontend && npm run build
+cd ../backend && uvicorn app.main:app --port 8000
+# -> http://127.0.0.1:8000  — API and interface, one process
+```
+
+Set `CT_FRONTEND_DIST` to serve a build from elsewhere, or point it at a path
+that does not exist to go back to API-only. `/api/...` is never answered with
+the HTML shell: an unmatched API path returns a JSON 404, because an SPA
+rewrite that returns `index.html` with a 200 is exactly what the frontend's
+health check exists to catch.
+
+**Installing without a network.** Running offline is not the same as
+*installing* offline — `pip install` and `npm ci` both reach out. On a
+connected machine:
+
+```bash
+scripts/bundle-offline.sh              # light profile, ~115 MB
+scripts/bundle-offline.sh --full       # with PyTorch + PyG + SHAP, ~2.5 GB
+```
+
+That produces `dist-offline/`: the built frontend, every Python dependency
+resolved *and built* into a wheel, the backend source, and an installer. Copy
+it to the air-gapped machine and:
+
+```bash
+./install.sh    # creates venv/ from the bundled wheels, with --no-index
+./run.sh        # http://127.0.0.1:8000
+```
+
+`--no-index` is deliberate: pip must not be able to fall back to PyPI, so a
+missing wheel fails on the machine that can still fix it rather than on the
+day the target is disconnected. Wheels are specific to an OS, CPU
+architecture and Python minor version — build the bundle on a machine that
+matches the target. `install.sh` checks the Python version and says so
+instead of failing halfway through.
+
+The only feature that needs the internet is **Ingest → Fetch Real Blockchain
+Data**, which calls Blockstream's public API by definition. Offline it
+answers `502` with an explanation naming the alternatives; fetch the data on
+a connected machine and upload the file instead.
+
 ### Checks
 
 ```bash
@@ -201,6 +272,9 @@ npm run check:icons     # icon geometry — runs as part of `npm run build`
 npm run test:unit       # the local filter/sort/paging rules, no browser needed
 npm run build
 npm run test:offline    # the offline-first acceptance test, in a real browser
+
+cd ../backend
+python tests/airgap.py  # the backend with every non-loopback socket refused
 ```
 
 `test:unit` checks `services/localQuery.js` against the routers it mirrors:
@@ -352,6 +426,9 @@ stay small so they read as connective tissue.
 ```
 Prototype/
 ├── docker-compose.yml
+├── scripts/
+│   └── bundle-offline.sh        # Builds an install bundle for a machine
+│                                # with no internet (wheels + built frontend)
 ├── backend/
 │   ├── app/
 │   │   ├── main.py             # FastAPI entry
@@ -375,6 +452,9 @@ Prototype/
 │   │   └── routers/             # FastAPI endpoints
 │   ├── requirements.txt         # Full dependency set
 │   ├── requirements-light.txt   # Without torch / PyG / SHAP (~120 MB)
+│   ├── tests/
+│   │   └── airgap.py            # Runs the whole backend with every
+│   │                            # non-loopback socket refused
 │   └── scripts/
 │       └── generate_synthetic.py
 └── frontend/

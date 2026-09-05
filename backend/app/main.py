@@ -4,11 +4,12 @@ ChainTrace Forensics — FastAPI Application Entry Point
 
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.database import init_database, close_database, get_db
@@ -153,14 +154,17 @@ app.include_router(ingest.router)
 app.include_router(settings_router.router)
 
 
-@app.get("/")
-def root():
-    return {
-        "name": "ChainTrace Forensics",
-        "version": "1.0.0",
-        "description": "AI-Powered Bitcoin Transaction Monitoring & Analysis",
-        "docs": "/docs",
-    }
+API_INFO = {
+    "name": "ChainTrace Forensics",
+    "version": "1.0.0",
+    "description": "AI-Powered Bitcoin Transaction Monitoring & Analysis",
+    "docs": "/docs",
+}
+
+
+@app.get("/api")
+def api_root():
+    return API_INFO
 
 
 @app.get("/api/health")
@@ -241,3 +245,75 @@ def recent_logs(limit: int = 200, run_id: str | None = None):
         "records": log_tail(limit=limit, run_id=run_id),
         "log_file": log_file_path(),
     }
+
+
+# ─── The built frontend, served from this process ────────────────────
+#
+# Registered last, after every router, so it can only ever see a path
+# nothing else claimed.
+#
+# This is what makes an air-gapped install one process: no nginx, no second
+# port, no CORS, no VITE_API_URL. The frontend calls the origin it was
+# served from, which is this one. With no build present the backend behaves
+# exactly as before and serves the API alone.
+
+_FRONTEND_DIST = Path(settings.FRONTEND_DIST)
+_FRONTEND_INDEX = _FRONTEND_DIST / "index.html"
+
+# Hashed build output: the bytes behind one of these URLs never change.
+_IMMUTABLE_PREFIXES = ("assets/", "fonts/", "icons/")
+
+# The worker must be revalidated on every load. Cached for even a few hours
+# it keeps serving the previous build's precache, and no deployment reaches
+# anyone until it expires. Same for the shell, which names asset hashes that
+# stop existing.
+_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
+
+def _serve_index() -> FileResponse:
+    return FileResponse(_FRONTEND_INDEX, media_type="text/html", headers=_NO_CACHE)
+
+
+if _FRONTEND_INDEX.is_file():
+    logger.info("Serving the frontend from %s", _FRONTEND_DIST)
+
+    @app.get("/{asset_path:path}", include_in_schema=False)
+    def frontend(asset_path: str):
+        """
+        A file from the build, or the SPA shell for a client-side route.
+
+        `/api/...` is answered with JSON 404 rather than the shell. An SPA
+        rewrite that returns index.html for an unmatched API path is exactly
+        what the frontend's health check exists to catch: a 200 with an HTML
+        body reads as a healthy backend right up until the first response is
+        parsed.
+        """
+        if asset_path == "api" or asset_path.startswith("api/"):
+            return JSONResponse(
+                status_code=404,
+                content={"error": "not_found", "detail": f"No API route for /{asset_path}."},
+            )
+
+        # Resolve inside the build directory and nowhere else: `..` segments
+        # in a request path must not reach the filesystem above it.
+        candidate = (_FRONTEND_DIST / asset_path).resolve()
+        root = _FRONTEND_DIST.resolve()
+        if asset_path and candidate.is_file() and candidate.is_relative_to(root):
+            if asset_path.startswith(_IMMUTABLE_PREFIXES):
+                headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+            elif asset_path == "sw.js":
+                headers = {**_NO_CACHE, "Service-Worker-Allowed": "/"}
+            else:
+                headers = _NO_CACHE
+            return FileResponse(candidate, headers=headers)
+
+        # Anything else is a client-side route.
+        return _serve_index()
+
+else:
+    # No build to serve, so `/` keeps answering with the API's own
+    # description as it always has. Dropping it would 404 the address people
+    # actually type at an API-only deployment.
+    @app.get("/")
+    def root():
+        return API_INFO

@@ -18,6 +18,16 @@ class Settings(BaseSettings):
     MODELS_DIR: Path = BASE_DIR / "data" / "models"
     GEOIP_DB_PATH: str = str(BASE_DIR / "data" / "GeoLite2-City.mmdb")
 
+    # A built frontend (frontend/dist) for the backend to serve itself.
+    #
+    # The two-process deployment — uvicorn plus nginx or a dev server — needs
+    # CORS configured, a proxy rule and a second port. On a machine with no
+    # network that is three more things to get right for no benefit, so when
+    # this directory holds a build the backend serves it from its own origin
+    # and the whole product is one process on one port. Set CT_FRONTEND_DIST
+    # to point elsewhere, or to a path that does not exist to turn it off.
+    FRONTEND_DIST: Path = BASE_DIR.parent / "frontend" / "dist"
+
     # ── API ────────────────────────────────────────────────────────────
     API_HOST: str = "0.0.0.0"
     API_PORT: int = int(os.environ.get("PORT", 8000))
