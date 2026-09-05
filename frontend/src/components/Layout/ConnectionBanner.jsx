@@ -68,6 +68,29 @@ export default function ConnectionBanner() {
     );
   }
 
+  // Reachable, but its database read failed. Distinct from 'empty' on
+  // purpose: telling an operator to ingest data they already have, because
+  // the backend could not open the file to look, sends them to fix the one
+  // thing that is not broken.
+  if (status === 'degraded') {
+    return (
+      <div className="conn-banner conn-banner-error">
+        <Icon name="alertTriangle" size={13} />
+        <span>
+          <b>Backend database unavailable</b> — {error} Anything on screen was
+          loaded earlier and may not reflect what is stored. The usual cause is a
+          second ChainTrace process holding the DuckDB file — a stale{' '}
+          <code>uvicorn --reload</code> worker or a container still running. Stop
+          the other process and retry.
+        </span>
+        <div className="conn-banner-actions">
+          <button onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
+          <Link to="/settings">Settings</Link>
+        </div>
+      </div>
+    );
+  }
+
   if (status === 'down') {
     return (
       <div className="conn-banner conn-banner-error">

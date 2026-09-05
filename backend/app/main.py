@@ -2,41 +2,40 @@
 ChainTrace Forensics — FastAPI Application Entry Point
 """
 
-import logging
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.config import settings
-from app.database import init_database, get_db_readonly
+from app.database import init_database, close_database, get_db
+from app.logging_config import configure_logging, get_logger, log_file_path
 from app.routers import dashboard, alerts, graph_explorer, wallets, transactions, ingest, settings as settings_router
 
-logger = logging.getLogger("chaintrace")
+configure_logging()
+logger = get_logger("app.main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle: initialize DB on startup."""
-    print("\n🔗 ChainTrace Forensics — Starting...")
+    logger.info("ChainTrace Forensics — starting")
+    logger.info("Logging to %s", log_file_path())
     init_database()
-    print("✓ Database initialized")
+    logger.info("Database initialized at %s", settings.DUCKDB_PATH)
 
     from app.ml.autoencoder import backend_name, backend_reason
-    print(f"  ML backend: {backend_name()} ({backend_reason()})")
+    logger.info("ML backend: %s (%s)", backend_name(), backend_reason())
 
     # Try loading existing models
     try:
-        from app.ml.trainer import run_full_pipeline, get_entity_graph
         from app.graph.builder import build_entity_graph
-        from app.database import get_db_readonly
 
-        with get_db_readonly() as con:
+        with get_db() as con:
             tx_count = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
 
         if tx_count > 0:
-            print(f"  Found {tx_count} existing transactions. Building graph...")
+            logger.info("Found %s existing transactions. Building graph...", tx_count)
             from app.ml import trainer
             trainer._entity_graph = build_entity_graph()
             from app.graph.clustering import cluster_wallets
@@ -45,7 +44,7 @@ async def lifespan(app: FastAPI):
             # risk tiers, only topology.
             from app.graph.builder import apply_scores_from_db
             scored = apply_scores_from_db(trainer._entity_graph)
-            print(f"  Restored scores for {scored} wallet(s)")
+            logger.info("Restored scores for %s wallet(s)", scored)
 
             # Try loading pre-trained models
             from app.ml.autoencoder import AnomalyDetector
@@ -57,15 +56,20 @@ async def lifespan(app: FastAPI):
             if embedder.load():
                 trainer._graph_embedder = embedder
 
-            print("✓ Existing data loaded")
+            logger.info("Existing data loaded")
         else:
-            print("ℹ No existing data. Upload a dataset via /api/ingest/upload")
-    except Exception as e:
-        print(f"⚠ Could not load existing data: {e}")
+            logger.info("No existing data. Upload a dataset via /api/ingest/upload")
+    except Exception:
+        # Logged with the traceback rather than as a one-line str(e): a
+        # failure here leaves the app serving an empty graph over a full
+        # database, and "Could not load existing data: 0" was never enough
+        # to work out why.
+        logger.exception("Could not load existing data")
 
-    print("✓ ChainTrace Forensics ready!\n")
+    logger.info("ChainTrace Forensics ready")
     yield
-    print("\n🔗 ChainTrace Forensics — Shutting down...")
+    logger.info("ChainTrace Forensics — shutting down")
+    close_database()
 
 
 app = FastAPI(
@@ -143,25 +147,68 @@ def root():
 @app.get("/api/health")
 def health():
     """
-    Liveness, plus the state the UI needs to distinguish an unreachable
-    backend from a reachable one with an empty database.
+    Liveness, plus the state the UI needs to tell four situations apart:
+    unreachable, reachable-but-broken, reachable-but-empty, and ready.
+
+    The previous version swallowed every database exception and returned
+    `has_data: false`, so a backend that could not open DuckDB at all — a
+    stale `uvicorn --reload` worker still holding the file lock is the usual
+    cause — was indistinguishable from one with nothing ingested. The app
+    then showed "no data ingested, go and ingest some" over a database that
+    was full, and every page that got its read in anyway rendered results
+    that contradicted the banner. Whatever goes wrong here is now named.
     """
     from app.ml.autoencoder import backend_name, backend_reason, is_light_mode
+    from app.ml.trainer import get_entity_graph
 
-    tx_count = 0
+    counts = {"transactions": 0, "wallets": 0, "alerts": 0}
+    db_error = None
     try:
-        with get_db_readonly() as con:
-            tx_count = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
-    except Exception:
-        pass
+        with get_db() as con:
+            counts["transactions"] = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+            counts["wallets"] = con.execute("SELECT COUNT(*) FROM wallet_features").fetchone()[0]
+            counts["alerts"] = con.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
+    except Exception as exc:
+        db_error = str(exc)
+        logger.exception("Health check could not read the database")
+
+    graph = get_entity_graph()
 
     return {
-        "status": "healthy",
+        # 'degraded' is still a live backend, so the frontend keeps talking
+        # to it — but it must not present the database as merely empty.
+        "status": "healthy" if db_error is None else "degraded",
         "service": "ChainTrace Forensics",
         "version": "1.0.0",
-        "has_data": tx_count > 0,
-        "transaction_count": tx_count,
+        "has_data": db_error is None and counts["transactions"] > 0,
+        "db_error": db_error,
+        "transaction_count": counts["transactions"],
+        "wallet_count": counts["wallets"],
+        "alert_count": counts["alerts"],
+        # In-memory analysis state. When this disagrees with the table counts
+        # the graph on screen is not backed by the current database, which is
+        # what made clicking a node return nothing at all.
+        "graph_nodes": graph.number_of_nodes() if graph is not None else 0,
         "light_mode": is_light_mode(),
         "ml_backend": backend_name(),
         "ml_backend_reason": backend_reason(),
+        "log_file": log_file_path(),
+    }
+
+
+@app.get("/api/logs")
+def recent_logs(limit: int = 200, run_id: str | None = None):
+    """
+    The tail of the server log.
+
+    Running ChainTrace locally usually means the backend's output is in a
+    terminal somewhere behind the browser, or — as happened here — in a
+    terminal that no longer exists. The operator needs to be able to read
+    what the backend actually did without going to find it.
+    """
+    from app.logging_config import log_tail
+    limit = max(1, min(limit, 1000))
+    return {
+        "records": log_tail(limit=limit, run_id=run_id),
+        "log_file": log_file_path(),
     }

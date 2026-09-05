@@ -266,7 +266,26 @@ export async function demoAdapter(config) {
   if (url === '/api/settings/seed-wallets') return ok(snap.seed_wallets, config);
 
   if (url === '/api/ingest/status') {
-    return ok({ status: 'completed', progress: 100, message: 'Snapshot loaded (no live pipeline).' }, config);
+    return ok({
+      status: 'completed', progress: 100, stage: null, stages: [],
+      message: 'Snapshot loaded (no live pipeline).',
+    }, config);
+  }
+
+  if (url === '/api/ingest/logs' || url === '/api/logs') {
+    // A snapshot has no server behind it, so there is no log to tail. Say so
+    // rather than 404-ing the panel into an error the operator has to decode.
+    return ok({
+      run_id: null,
+      status: 'completed',
+      records: [{
+        ts: snap.generated_from || null,
+        level: 'INFO',
+        logger: 'snapshot',
+        message: 'Snapshot mode: no backend is attached, so there is no server log to show.',
+      }],
+      log_file: null,
+    }, config);
   }
 
   return fail(config, 404, `No snapshot data for ${url}.`);

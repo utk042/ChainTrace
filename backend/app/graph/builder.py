@@ -8,6 +8,10 @@ import duckdb
 from typing import Optional
 from app.database import get_db_readonly
 
+from app.logging_config import get_logger
+
+logger = get_logger("app.graph.builder")
+
 
 def build_entity_graph(con: duckdb.DuckDBPyConnection = None) -> nx.Graph:
     """
@@ -106,7 +110,7 @@ def apply_scores_from_db(G: nx.Graph, con: duckdb.DuckDBPyConnection = None) -> 
             "SELECT address, anomaly_score, risk_tier, cluster_id FROM wallet_features"
         ).fetchall()
     except Exception as e:
-        print(f"⚠ Could not read wallet_features to score the graph: {e}")
+        logger.warning(f"Could not read wallet_features to score the graph: {e}")
         return 0
     finally:
         if own_connection:

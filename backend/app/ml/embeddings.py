@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Optional
 from app.config import settings
 
+from app.logging_config import get_logger
+
+logger = get_logger("app.ml.embeddings")
+
 torch = None
 PyGNode2Vec = None
 
@@ -32,7 +36,7 @@ def _pyg_available() -> bool:
         torch, PyGNode2Vec = _torch, _Node2Vec
         return True
     except Exception as e:
-        print(f"⚠ PyTorch Geometric not available ({e}). Using structural embeddings.")
+        logger.warning(f"PyTorch Geometric not available ({e}). Using structural embeddings.")
         return False
 
 
@@ -62,14 +66,14 @@ class GraphEmbedder:
                 self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 return self._fit_pyg(G)
             except Exception as e:
-                print(f"  PyG Node2Vec fallback: {e}")
+                logger.info(f"PyG Node2Vec fallback: {e}")
                 return self._fit_fallback(G)
         else:
             return self._fit_fallback(G)
 
     def _fit_pyg(self, G: nx.Graph) -> dict[str, np.ndarray]:
         """Train Node2Vec using PyTorch Geometric."""
-        print("  Training Node2Vec embeddings (PyG)...")
+        logger.info("Training Node2Vec embeddings (PyG)...")
 
         # Map node IDs to integers
         node_list = list(G.nodes())
@@ -112,7 +116,7 @@ class GraphEmbedder:
                 optimizer.step()
 
             if (epoch + 1) % 10 == 0:
-                print(f"    Epoch {epoch + 1}/{settings.N2V_EPOCHS} — Loss: {loss.item():.4f}")
+                logger.info(f"Epoch {epoch + 1}/{settings.N2V_EPOCHS} — Loss: {loss.item():.4f}")
 
         # Extract embeddings
         model.eval()
@@ -124,12 +128,12 @@ class GraphEmbedder:
             for i in range(len(node_list))
         }
 
-        print(f"  ✓ Node2Vec: {len(self.embeddings)} node embeddings computed")
+        logger.info(f"Node2Vec: {len(self.embeddings)} node embeddings computed")
         return self.embeddings
 
     def _fit_fallback(self, G: nx.Graph) -> dict[str, np.ndarray]:
         """Fallback: use graph-based feature hashing when PyG is unavailable."""
-        print("  Computing fallback graph embeddings...")
+        logger.info("Computing fallback graph embeddings...")
 
         node_list = list(G.nodes())
         n = len(node_list)
@@ -153,7 +157,7 @@ class GraphEmbedder:
 
             self.embeddings[node] = features
 
-        print(f"  ✓ Fallback embeddings: {len(self.embeddings)} nodes")
+        logger.info(f"Fallback embeddings: {len(self.embeddings)} nodes")
         return self.embeddings
 
     def get_embedding(self, node_id: str) -> np.ndarray:
@@ -198,7 +202,7 @@ class GraphEmbedder:
         path = path or settings.MODELS_DIR
         path.mkdir(parents=True, exist_ok=True)
         np.savez(path / "node2vec_embeddings.npz", **self.embeddings)
-        print(f"  ✓ Embeddings saved to {path / 'node2vec_embeddings.npz'}")
+        logger.info(f"Embeddings saved to {path / 'node2vec_embeddings.npz'}")
 
     def load(self, path: Path = None) -> bool:
         """Load embeddings from disk."""
@@ -209,5 +213,5 @@ class GraphEmbedder:
 
         data = np.load(emb_file)
         self.embeddings = {k: data[k] for k in data.files}
-        print(f"  ✓ Loaded {len(self.embeddings)} embeddings from disk")
+        logger.info(f"Loaded {len(self.embeddings)} embeddings from disk")
         return True
