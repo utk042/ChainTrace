@@ -235,6 +235,36 @@ async function cacheStatus() {
   return { buildId: BUILD_ID, shellEntries, apiEntries, newestApi, usage };
 }
 
+/**
+ * Every stored response for one API path, newest first.
+ *
+ * Cache entries are keyed by the full URL, so `/api/wallets?page=2&…` misses
+ * the copy stored for page 1 even though the rows for both came down in the
+ * same whole-table prefetch. Offline, that miss surfaced as "no stored
+ * copy of this query is available" on a device that was holding the data.
+ * This hands the client every stored response for the path and lets it cut
+ * the requested page out of the widest one — real backend output, re-sliced,
+ * never re-invented.
+ */
+async function matchPath(path) {
+  const cache = await caches.open(API_CACHE);
+  const keys = await cache.keys();
+  const out = [];
+  for (const key of keys) {
+    let url;
+    try { url = new URL(key.url); } catch { continue; }
+    if (url.pathname !== path) continue;
+    const res = await cache.match(key);
+    if (!res || !res.ok) continue;
+    let body;
+    try { body = await res.json(); } catch { continue; }
+    out.push({ url: key.url, cachedAt: res.headers.get(CACHED_AT_HEADER) || null, body });
+  }
+  // Newest first, so a re-slice quotes the freshest stamp it used.
+  out.sort((a, b) => String(b.cachedAt || '').localeCompare(String(a.cachedAt || '')));
+  return { entries: out };
+}
+
 /** Warm the API cache so a named set of reads survives going offline. */
 async function prefetch(urls) {
   const cache = await caches.open(API_CACHE);
@@ -270,5 +300,9 @@ self.addEventListener('message', (event) => {
   }
   if (data.type === 'PREFETCH_API') {
     event.waitUntil(prefetch(data.urls || []).then(reply, (e) => reply({ error: String(e) })));
+    return;
+  }
+  if (data.type === 'MATCH_PATH') {
+    event.waitUntil(matchPath(data.path).then(reply, (e) => reply({ error: String(e) })));
   }
 });

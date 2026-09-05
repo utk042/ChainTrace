@@ -265,7 +265,13 @@ export default function GraphExplorer() {
     setLoading(true);
     try {
       const res = await getSubgraph(nodeId, hops);
-      if (!res.data?.nodes?.length) { flash('No subgraph available for that entity.'); return; }
+      if (!res.data?.nodes?.length) {
+        // The router says why — not in the graph, nothing ingested, filtered
+        // out. Dropping that for a generic line is what sent operators
+        // looking for a bug in the canvas.
+        flash(res.data?.reason || `No subgraph is available for ${shortId(nodeId)}.`);
+        return;
+      }
       setIsolatedNode(nodeId);
       focusAfterLoad.current = nodeId;
       setGraphData(res.data);

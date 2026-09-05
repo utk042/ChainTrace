@@ -134,7 +134,19 @@ launcher. A new deployment is picked up in the background and offered as a
 **2. Backend results are stored as you read them.** Every `GET` the app makes
 is cached, and served back when the backend cannot be reached. Before leaving
 a connected network, **Settings → Offline & Data → Save for offline** pulls the
-dashboard, alerts, wallets, transactions and graph down in one pass.
+dashboard, graph and the alerts, wallets and transactions *tables* down in one
+pass.
+
+Stored responses are keyed by their exact URL, which on its own is too strict
+to be useful: opening page 2, sorting a column or ticking a filter is a
+different URL, so it missed the cache and the page reported that nothing was
+stored — on a device that was holding every row involved. So the tables are
+saved whole, and when a read finds no exact match the app re-runs the filter,
+sort and pagination locally over the stored rows
+(`frontend/src/services/localQuery.js`, shared with snapshot mode so the two
+behave identically). When the stored rows cannot cover a view — a table larger
+than what was saved — the page says so above the results instead of letting a
+short answer read as a complete one.
 
 Stored data is never passed off as live. Each cached response carries the time
 it was fetched, and while the app is serving one, the banner reads *"showing
@@ -186,15 +198,22 @@ everything else works.)
 ```bash
 cd frontend
 npm run check:icons     # icon geometry — runs as part of `npm run build`
+npm run test:unit       # the local filter/sort/paging rules, no browser needed
 npm run build
 npm run test:offline    # the offline-first acceptance test, in a real browser
 ```
+
+`test:unit` checks `services/localQuery.js` against the routers it mirrors:
+that the filters mean what the SQL means, and that a view cut locally never
+claims to describe more rows than the device is holding.
 
 `test:offline` drives Chromium through the whole promise: it loads the app,
 waits for the service worker to take control, stores data through
 **Settings → Offline & Data**, **kills the server**, then re-loads all seven
 routes and asserts they render from storage, are labelled as stored rather
-than live, and go back to live when the server returns.
+than live, and go back to live when the server returns. It also pages and
+filters the wallets table while offline, which is the case exact-URL cache
+keys used to turn into an error page.
 
 The server is killed rather than using Playwright's `context.setOffline()`,
 which only cuts the page's own network and not the fetches the service worker
@@ -388,6 +407,10 @@ Prototype/
             ├── commands.js   # Menu-bar command registry (pages register what they can do)
             ├── format.js     # One definition each for identifier, figure and date display
             ├── demoAdapter.js  # Serves the bundled snapshot through axios
+            ├── localQuery.js # Filter/sort/page rules mirroring the routers,
+            │                 # shared by snapshot mode and the offline path
+            ├── offlineFallback.js # Re-cuts a view from stored rows when a
+            │                      # read cannot reach the backend
             └── offline.js    # Service-worker lifecycle and cache controls
 ```
 

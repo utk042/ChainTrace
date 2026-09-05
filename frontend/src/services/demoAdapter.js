@@ -18,6 +18,9 @@
  */
 
 import { REQUIRED_API_REVISION } from './apiContract';
+import {
+  num, sortRows, paginate, filterAlerts, filterWallets, filterTransactions,
+} from './localQuery';
 
 const DEMO_KEY = 'CT_DEMO_MODE';
 
@@ -58,40 +61,6 @@ const fail = (config, status, message) => {
   return Promise.reject(error);
 };
 
-const num = (v, d = 0) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
-};
-
-/**
- * Sort a snapshot table the way the backend would.
- *
- * Without this, changing a column sort re-requested the same rows and
- * nothing moved — a control that looks live and is not, which is exactly
- * what snapshot mode exists to avoid.
- */
-function sortRows(rows, params, fallbackKey) {
-  const key = params.sort_by || fallbackKey;
-  const dir = String(params.sort_order || 'desc').toLowerCase() === 'asc' ? 1 : -1;
-  const sorted = [...rows].sort((a, b) => {
-    const x = a?.[key];
-    const y = b?.[key];
-    if (x === y) return 0;
-    if (x === null || x === undefined) return 1;
-    if (y === null || y === undefined) return -1;
-    if (typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
-    return String(x).localeCompare(String(y)) * dir;
-  });
-  return sorted;
-}
-
-function paginate(rows, params, key) {
-  const page = num(params.page, 1);
-  const size = num(params.page_size, 20);
-  const start = (page - 1) * size;
-  return { [key]: rows.slice(start, start + size), total: rows.length, page, page_size: size };
-}
-
 function searchSnapshot(snap, q, limit, nodeType) {
   const needle = String(q || '').toLowerCase();
   if (!needle) return [];
@@ -118,8 +87,14 @@ function searchSnapshot(snap, q, limit, nodeType) {
   return scored.slice(0, limit).map((s) => s.row);
 }
 
-/** Breadth-first shortest path over the snapshot's own edge list. */
-function pathInSnapshot(snap, source, target) {
+/**
+ * Undirected adjacency over the snapshot's edge list, built once.
+ *
+ * The backend answers expansion, isolation and path queries by walking its
+ * own graph. Every one of those needs the same index here, so it is built on
+ * first use and kept on the snapshot object.
+ */
+function adjacencyOf(snap) {
   if (!snap._adjacency) {
     const adjacency = new Map();
     for (const e of snap.graph.edges) {
@@ -130,7 +105,135 @@ function pathInSnapshot(snap, source, target) {
     }
     snap._adjacency = adjacency;
   }
-  const adjacency = snap._adjacency;
+  return snap._adjacency;
+}
+
+/** Nodes by id, built once. */
+function nodesById(snap) {
+  if (!snap._nodesById) {
+    snap._nodesById = new Map(snap.graph.nodes.map((n) => [n.id, n]));
+  }
+  return snap._nodesById;
+}
+
+const degreeOf = (snap, id) => (adjacencyOf(snap).get(id) || []).length;
+
+/** The nodes+edges fragment shape the canvas merges, cut from the snapshot. */
+function fragmentOf(snap, ids) {
+  const byId = nodesById(snap);
+  const keep = new Set([...ids].filter((id) => byId.has(id)));
+  const nodes = [...keep].map((id) => {
+    const n = byId.get(id);
+    return {
+      ...n,
+      metadata: { ...(n.metadata || {}), degree: n.metadata?.degree ?? degreeOf(snap, id) },
+    };
+  });
+  const edges = snap.graph.edges.filter((e) => keep.has(e.source) && keep.has(e.target));
+  return { nodes, edges };
+}
+
+/**
+ * One hop out from a node, as /api/graph/neighbors returns it.
+ *
+ * The snapshot ships a precomputed answer for sixty entities. The other six
+ * hundred-odd nodes on the canvas fell through to an empty fragment, and the
+ * Graph Explorer reported that as "all neighbours are already on the canvas"
+ * — the expand button doing nothing, with a message saying it had worked.
+ * Everything needed to answer properly is in the edge list.
+ */
+function neighborsInSnapshot(snap, id, limit) {
+  const precomputed = snap.neighbors?.[id];
+  if (precomputed) return precomputed;
+
+  const adjacency = adjacencyOf(snap);
+  if (!adjacency.has(id)) {
+    return { nodes: [], edges: [], truncated: false, total_neighbors: 0 };
+  }
+  const unique = [...new Set(adjacency.get(id).map(([other]) => other))];
+  const total = unique.length;
+  // Highest-degree neighbours first, as the router orders them: those are
+  // the ones that connect onward.
+  unique.sort((a, b) => degreeOf(snap, b) - degreeOf(snap, a));
+  const kept = unique.slice(0, limit);
+  return {
+    ...fragmentOf(snap, [id, ...kept]),
+    truncated: total > kept.length,
+    total_neighbors: total,
+  };
+}
+
+/** The n-hop ego network around an entity, as /api/graph/subgraph returns it. */
+function subgraphInSnapshot(snap, id, hops, maxNodes) {
+  const adjacency = adjacencyOf(snap);
+  if (!adjacency.has(id)) return null;
+
+  const seen = new Set([id]);
+  let frontier = [id];
+  for (let depth = 0; depth < hops && seen.size < maxNodes; depth += 1) {
+    const next = [];
+    for (const current of frontier) {
+      for (const [other] of adjacency.get(current) || []) {
+        if (seen.has(other)) continue;
+        seen.add(other);
+        next.push(other);
+        if (seen.size >= maxNodes) break;
+      }
+      if (seen.size >= maxNodes) break;
+    }
+    frontier = next;
+    if (!frontier.length) break;
+  }
+  const fragment = fragmentOf(snap, seen);
+  return {
+    ...fragment,
+    clusters: snap.graph.clusters,
+    stats: {
+      total_nodes: fragment.nodes.length,
+      total_edges: fragment.edges.length,
+      cluster_count: new Set(fragment.nodes.map((n) => n.cluster_id).filter((c) => c != null)).size,
+    },
+    ready: true,
+    focus: id,
+  };
+}
+
+/** The empty graph payload the router returns, with its reason. */
+const emptyGraph = (reason) => ({
+  nodes: [], edges: [], clusters: {},
+  stats: { total_nodes: 0, total_edges: 0, cluster_count: 0 },
+  ready: false,
+  reason,
+});
+
+/** /api/graph/clusters, summarised from the snapshot's own cluster map. */
+function clustersInSnapshot(snap) {
+  const byId = nodesById(snap);
+  const summaries = Object.entries(snap.graph.clusters || {}).map(([clusterId, wallets]) => {
+    let totalSent = 0;
+    let totalReceived = 0;
+    let txCount = 0;
+    for (const address of wallets) {
+      const attrs = snap.node_details?.[address]?.attributes || byId.get(address)?.metadata || {};
+      totalSent += num(attrs.total_sent);
+      totalReceived += num(attrs.total_received);
+      txCount += num(attrs.tx_count);
+    }
+    return {
+      cluster_id: Number(clusterId),
+      wallet_count: wallets.length,
+      total_sent: Number(totalSent.toFixed(8)),
+      total_received: Number(totalReceived.toFixed(8)),
+      tx_count: txCount,
+      wallets: wallets.slice(0, 10),
+    };
+  });
+  return summaries.sort((a, b) => b.tx_count - a.tx_count || b.wallet_count - a.wallet_count);
+}
+
+/** Breadth-first shortest path over the snapshot's own edge list. */
+function pathInSnapshot(snap, source, target) {
+  const adjacency = adjacencyOf(snap);
   if (!adjacency.has(source)) return { found: false, reason: `'${source}' is not in the snapshot.` };
   if (!adjacency.has(target)) return { found: false, reason: `'${target}' is not in the snapshot.` };
   if (source === target) return { found: false, reason: 'Source and target are the same entity.' };
@@ -160,7 +263,7 @@ function pathInSnapshot(snap, source, target) {
     at = step[0];
   }
 
-  const byId = new Map(snap.graph.nodes.map((n) => [n.id, n]));
+  const byId = nodesById(snap);
   return {
     found: true,
     length: ids.length - 1,
@@ -227,21 +330,34 @@ export async function demoAdapter(config) {
 
   if (url.startsWith('/api/graph/node/')) {
     const id = tail('/api/graph/node/');
-    return ok(snap.node_details[id] || { found: false, id }, config);
+    // A bare `found: false` left the inspector showing UNKNOWN with no
+    // explanation, which reads as a bug rather than as the limit of a
+    // sample. The inspector renders `detail`, so say what happened.
+    return ok(snap.node_details[id] || {
+      found: false,
+      id,
+      reason: 'not_in_snapshot',
+      detail: `'${id}' is not in this snapshot. It carries a 700-node sample `
+        + 'of one pipeline run, not the whole entity graph — connect to a '
+        + 'backend to look this entity up.',
+    }, config);
   }
 
   if (url.startsWith('/api/graph/neighbors/')) {
     const id = tail('/api/graph/neighbors/');
-    return ok(
-      snap.neighbors[id] || { nodes: [], edges: [], truncated: false, total_neighbors: 0 },
-      config,
-    );
+    return ok(neighborsInSnapshot(snap, id, num(params.limit, 60)), config);
   }
 
   if (url.startsWith('/api/graph/subgraph/')) {
-    // No server to re-cut a subgraph: return the whole graph and let the
-    // caller centre on the requested node.
-    return ok({ ...snap.graph, ready: true, focus: tail('/api/graph/subgraph/') }, config);
+    // A real ego network, walked over the snapshot's edges. Returning the
+    // whole graph here was what made "Isolate" and "Open in graph" report
+    // success while changing nothing on the canvas.
+    const id = tail('/api/graph/subgraph/');
+    const sub = subgraphInSnapshot(snap, id, num(params.hops, 2), num(params.max_nodes, 600));
+    return ok(sub || emptyGraph(
+      `'${id}' is not in the snapshot's sampled graph, so it has no `
+      + 'neighbourhood to isolate here. Connect to a backend to trace it.',
+    ), config);
   }
 
   if (url === '/api/graph/search') {
@@ -253,23 +369,12 @@ export async function demoAdapter(config) {
   }
 
   if (url === '/api/graph/stats') return ok({ ...snap.graph.stats, ready: true }, config);
-  if (url === '/api/graph/clusters') return ok([], config);
+  // The snapshot carries its cluster map; answering [] here reported "the
+  // backend has not computed any wallet clusters" over 135 of them.
+  if (url === '/api/graph/clusters') return ok(clustersInSnapshot(snap), config);
 
   if (url === '/api/alerts') {
-    const rows = snap.alerts.alerts || [];
-    const needle = params.search ? String(params.search).toLowerCase() : null;
-    const filtered = rows.filter((a) => {
-      if (params.risk_tier && a.risk_tier !== params.risk_tier) return false;
-      if (params.status && a.status !== params.status) return false;
-      if (params.entity_type && a.entity_type !== params.entity_type) return false;
-      if (params.model && a.model !== params.model) return false;
-      if (num(params.min_confidence) > 0 && num(a.confidence) < num(params.min_confidence)) return false;
-      // The backend searches the description as well as the entity id, and a
-      // filter panel that behaves differently offline is worse than no
-      // offline mode at all.
-      if (needle && !`${a.entity_id || ''} ${a.description || ''}`.toLowerCase().includes(needle)) return false;
-      return true;
-    });
+    const filtered = filterAlerts(snap.alerts.alerts || [], params);
     return ok(paginate(sortRows(filtered, params, 'confidence'), params, 'alerts'), config);
   }
 
@@ -286,13 +391,7 @@ export async function demoAdapter(config) {
   }
 
   if (url === '/api/wallets') {
-    const rows = snap.wallets.wallets || [];
-    const filtered = rows.filter((w) => {
-      if (params.risk_tier && w.risk_tier !== params.risk_tier) return false;
-      if (params.search && !w.address?.toLowerCase().includes(String(params.search).toLowerCase())) return false;
-      if (num(params.min_score) > 0 && num(w.anomaly_score) < num(params.min_score)) return false;
-      return true;
-    });
+    const filtered = filterWallets(snap.wallets.wallets || [], params);
     return ok(paginate(sortRows(filtered, params, 'anomaly_score'), params, 'wallets'), config);
   }
 
@@ -303,12 +402,7 @@ export async function demoAdapter(config) {
   }
 
   if (url === '/api/transactions') {
-    const rows = snap.transactions.transactions || [];
-    const needle = params.search ? String(params.search).toLowerCase() : null;
-    const filtered = needle
-      ? rows.filter((t) => `${t.txid || ''} ${t.src_ip || ''} ${t.dst_ip || ''}`
-        .toLowerCase().includes(needle))
-      : rows;
+    const filtered = filterTransactions(snap.transactions.transactions || [], params);
     return ok(paginate(sortRows(filtered, params, 'timestamp'), params, 'transactions'), config);
   }
 

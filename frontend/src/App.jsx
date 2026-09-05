@@ -4,6 +4,7 @@ import TitleBar from './components/Layout/TitleBar';
 import MenuBar from './components/Layout/MenuBar';
 import Rail from './components/Layout/Rail';
 import ConnectionBanner from './components/Layout/ConnectionBanner';
+import StatusBar from './components/Layout/StatusBar';
 import UpdatePrompt from './components/Layout/UpdatePrompt';
 import ErrorBoundary from './components/ErrorBoundary';
 import { SessionProvider, useSession } from './state/SessionProvider';
@@ -73,6 +74,7 @@ function Shell() {
           </ErrorBoundary>
         </main>
       </div>
+      <StatusBar />
       <UpdatePrompt />
     </div>
   );
