@@ -4,6 +4,7 @@ import Icon from '../Icon';
 import Menu, { MenuItem, MenuSeparator, MenuHeading } from '../ui/Menu';
 import { useSession } from '../../state/SessionProvider';
 import { VIEWS } from '../../state/views';
+import { shortcut } from '../../services/platform';
 
 /**
  * The window's title bar: the application mark, global search, and one tab
@@ -58,7 +59,7 @@ export default function TitleBar() {
           placeholder="Search address, txid or IP"
           aria-label="Search the entity graph"
         />
-        <kbd>⌘K</kbd>
+        <kbd>{shortcut('K')}</kbd>
       </form>
 
       <div className="titlebar-tabs" role="tablist" aria-label="Open views">

@@ -18,6 +18,7 @@ import Collapse from '../components/ui/Collapse';
 import CopyButton from '../components/ui/CopyButton';
 import { HistogramFacet } from '../components/ui/Histogram';
 import { Loading, Empty, Failed, Notice } from '../components/ui/States';
+import Select from '../components/ui/Select';
 import { useSession } from '../state/SessionProvider';
 
 const PAGE_SIZE = 25;
@@ -495,17 +496,15 @@ export default function Alerts() {
                   <button className="reset" onClick={() => update({ entity_type: '' })}>clear</button>
                 )}
               </div>
-              <select
-                className="select"
+              <Select
                 value={filters.entity_type}
-                onChange={(e) => update({ entity_type: e.target.value })}
-                aria-label="Entity type"
-              >
-                <option value="">Any type</option>
-                {ENTITY_TYPES.map((t) => (
-                  <option key={t.key} value={t.key}>{t.label}</option>
-                ))}
-              </select>
+                onChange={(v) => update({ entity_type: v })}
+                ariaLabel="Entity type"
+                options={[
+                  { value: '', label: 'Any type' },
+                  ...ENTITY_TYPES.map((t) => ({ value: t.key, label: t.label })),
+                ]}
+              />
             </div>
 
             <div className="filter-block">
@@ -515,17 +514,15 @@ export default function Alerts() {
                   <button className="reset" onClick={() => update({ model: '' })}>clear</button>
                 )}
               </div>
-              <select
-                className="select"
+              <Select
                 value={filters.model}
-                onChange={(e) => update({ model: e.target.value })}
-                aria-label="Model"
-              >
-                <option value="">Any model</option>
-                {MODELS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+                onChange={(v) => update({ model: v })}
+                ariaLabel="Model"
+                options={[
+                  { value: '', label: 'Any model' },
+                  ...MODELS.map((m) => ({ value: m, label: m })),
+                ]}
+              />
             </div>
 
             <div className="section-label">

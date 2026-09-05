@@ -10,6 +10,7 @@
     "check:icons": "node scripts/check-icons.mjs",
     "build:standalone": "npm run check:icons && npm run check:api-revision && vite build --mode standalone && node scripts/build-standalone.mjs",
     "test:offline": "node tests/offline.spec.mjs",
+    "test:ui": "node tests/ui.spec.mjs",
     "test:unit": "node tests/localQuery.test.mjs",
     "check:api-revision": "node scripts/check-api-revision.mjs"
   },

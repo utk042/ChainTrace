@@ -121,5 +121,21 @@ export const chartTooltip = (extra = {}) => ({
   borderWidth: 1,
   padding: [6, 10],
   textStyle: { color: TEXT.primary, fontSize: 11, fontFamily: FONT_MONO },
+  // These panels are short — a 240px plot with a three-line tooltip — so an
+  // unconfined tooltip near the bottom or the right edge is drawn half
+  // outside the chart and clipped by the panel, which is how a reading ends
+  // up with its last row cut off.
+  confine: true,
+  // A hover reading has to name the period it belongs to, so the pointer
+  // that marks it must be unmistakably on one bar. `shadow` fills the whole
+  // category slot: with grouped series the bars occupy a fraction of that
+  // slot, and the band spilled across the gaps into its neighbours, leaving
+  // the reader guessing which bar the numbers described. A line lands on the
+  // category's centre and cannot be read as covering two.
+  axisPointer: {
+    type: 'shadow',
+    shadowStyle: { color: 'rgba(143, 153, 168, 0.10)' },
+    z: 0,
+  },
   ...extra,
 });

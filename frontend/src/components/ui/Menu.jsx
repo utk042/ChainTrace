@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from '../Icon';
 
 /**
@@ -9,6 +10,14 @@ import Icon from '../Icon';
  * because the same menu opens from the far right of the title bar and from
  * the middle of a panel — an unclamped popover is how a menu ends up half
  * off-screen with no way to reach its last item.
+ *
+ * The surface is rendered into <body> through a portal. `position: fixed`
+ * alone is not enough: the menu bar carries a z-index of its own, which makes
+ * it a stacking context, and inside one an element's z-index is compared only
+ * against its siblings. The File menu was drawn under the icon rail for
+ * exactly that reason — 200 inside the menu bar's context still lost to the
+ * rail's 200 in the root. A portal puts the surface where its z-index means
+ * what it says.
  */
 
 export function MenuItem({ icon, label, hint, onSelect, disabled, close }) {
@@ -38,7 +47,7 @@ export function MenuHeading({ children }) {
  * `align` picks which edge of the trigger the menu hangs from. `below`
  * anchors under the trigger (menu bar, Actions buttons).
  */
-export default function Menu({ trigger, align = 'left', children, className = '' }) {
+export default function Menu({ trigger, align = 'left', children, className = '', matchWidth = false }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const anchorRef = useRef(null);
@@ -69,6 +78,10 @@ export default function Menu({ trigger, align = 'left', children, className = ''
   useLayoutEffect(() => {
     if (!open || !anchorRef.current || !surfaceRef.current) return;
     const a = anchorRef.current.getBoundingClientRect();
+    // A dropdown standing in for a select has to be at least as wide as the
+    // control it replaces, or the open list is narrower than the closed one
+    // and the options it holds are the ones that get truncated.
+    if (matchWidth) surfaceRef.current.style.minWidth = `${a.width}px`;
     const s = surfaceRef.current.getBoundingClientRect();
     const margin = 6;
 
@@ -82,14 +95,14 @@ export default function Menu({ trigger, align = 'left', children, className = ''
       top = Math.max(margin, a.top - s.height - 2);
     }
     setPos({ left, top });
-  }, [open, align]);
+  }, [open, align, matchWidth]);
 
   return (
     <>
       <span ref={anchorRef} style={{ display: 'inline-flex', minWidth: 0 }}>
         {trigger({ open, toggle: () => setOpen((v) => !v), close })}
       </span>
-      {open && (
+      {open && createPortal(
         <div
           ref={surfaceRef}
           className={`menu-surface ${className}`}
@@ -102,7 +115,8 @@ export default function Menu({ trigger, align = 'left', children, className = ''
           }}
         >
           {typeof children === 'function' ? children({ close }) : children}
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

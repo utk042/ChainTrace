@@ -5,6 +5,7 @@ import Menu, { MenuItem, MenuSeparator, MenuHeading } from '../ui/Menu';
 import { useSession } from '../../state/SessionProvider';
 import { VIEWS } from '../../state/views';
 import { runCommand, useAvailableCommands } from '../../services/commands';
+import { shortcut } from '../../services/platform';
 import { fmtRelative } from '../../services/format';
 
 /** "localhost:8000" from a configured API URL; null when it is this origin. */
@@ -32,11 +33,11 @@ const MENUS = [
     items: [
       { label: 'Ingest data…', icon: 'uploadCloud', go: '/ingest' },
       { separator: true },
-      { label: 'Export view as CSV', icon: 'download', command: 'export.csv', hint: 'Ctrl+E' },
+      { label: 'Export view as CSV', icon: 'download', command: 'export.csv', hint: shortcut('E') },
       { label: 'Export view as JSON', icon: 'boxDown', command: 'export.json' },
       { label: 'Export graph as PNG', icon: 'image', command: 'export.png' },
       { separator: true },
-      { label: 'Reload from backend', icon: 'refresh', command: 'reload', hint: 'Ctrl+R' },
+      { label: 'Reload from backend', icon: 'refresh', command: 'reload' },
     ],
   },
   {
@@ -75,7 +76,10 @@ const MENUS = [
 
 export default function MenuBar() {
   const navigate = useNavigate();
-  const { provenance, demo, backend, tabs, activeTabId, switchTab, closeTab, openTab } = useSession();
+  const {
+    provenance, demo, backend, tabs, activeTabId, switchTab, closeTab, openTab,
+    openShortcuts,
+  } = useSession();
   const available = useAvailableCommands();
   const now = useClock();
 
@@ -199,8 +203,8 @@ export default function MenuBar() {
                 close={close}
                 icon="info"
                 label="Keyboard shortcuts"
-                disabled={!available.includes('help.shortcuts')}
-                onSelect={() => runCommand('help.shortcuts')}
+                hint="?"
+                onSelect={openShortcuts}
               />
               <MenuItem
                 close={close}
