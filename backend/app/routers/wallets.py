@@ -2,7 +2,7 @@
 ChainTrace Forensics — Wallets Router
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from app.database import get_db_readonly
 from typing import Optional
 
@@ -96,7 +96,7 @@ def get_wallet_detail(address: str):
         """, [address]).fetchone()
 
         if not row:
-            return {"error": "Wallet not found"}
+            raise HTTPException(status_code=404, detail=f"No wallet '{address}' in the current dataset.")
 
         # Get connected transactions
         txs = con.execute("""
