@@ -63,6 +63,28 @@ const num = (v, d = 0) => {
   return Number.isFinite(n) ? n : d;
 };
 
+/**
+ * Sort a snapshot table the way the backend would.
+ *
+ * Without this, changing a column sort re-requested the same rows and
+ * nothing moved — a control that looks live and is not, which is exactly
+ * what snapshot mode exists to avoid.
+ */
+function sortRows(rows, params, fallbackKey) {
+  const key = params.sort_by || fallbackKey;
+  const dir = String(params.sort_order || 'desc').toLowerCase() === 'asc' ? 1 : -1;
+  const sorted = [...rows].sort((a, b) => {
+    const x = a?.[key];
+    const y = b?.[key];
+    if (x === y) return 0;
+    if (x === null || x === undefined) return 1;
+    if (y === null || y === undefined) return -1;
+    if (typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
+    return String(x).localeCompare(String(y)) * dir;
+  });
+  return sorted;
+}
+
 function paginate(rows, params, key) {
   const page = num(params.page, 1);
   const size = num(params.page_size, 20);
@@ -235,13 +257,32 @@ export async function demoAdapter(config) {
 
   if (url === '/api/alerts') {
     const rows = snap.alerts.alerts || [];
+    const needle = params.search ? String(params.search).toLowerCase() : null;
     const filtered = rows.filter((a) => {
       if (params.risk_tier && a.risk_tier !== params.risk_tier) return false;
       if (params.status && a.status !== params.status) return false;
-      if (params.search && !a.entity_id?.toLowerCase().includes(String(params.search).toLowerCase())) return false;
+      if (params.entity_type && a.entity_type !== params.entity_type) return false;
+      if (params.model && a.model !== params.model) return false;
+      if (num(params.min_confidence) > 0 && num(a.confidence) < num(params.min_confidence)) return false;
+      // The backend searches the description as well as the entity id, and a
+      // filter panel that behaves differently offline is worse than no
+      // offline mode at all.
+      if (needle && !`${a.entity_id || ''} ${a.description || ''}`.toLowerCase().includes(needle)) return false;
       return true;
     });
-    return ok(paginate(filtered, params, 'alerts'), config);
+    return ok(paginate(sortRows(filtered, params, 'confidence'), params, 'alerts'), config);
+  }
+
+  if (url === '/api/alerts/export') {
+    // No server to stream a CSV; the page builds one from the rows it can
+    // load instead, and says that is what it did.
+    return fail(config, 404, 'Snapshot mode has no server-side export endpoint.');
+  }
+
+  if (url.startsWith('/api/alerts/')) {
+    const alertId = tail('/api/alerts/');
+    const row = (snap.alerts.alerts || []).find((a) => a.alert_id === alertId);
+    return row ? ok(row, config) : fail(config, 404, 'Alert not in this snapshot.');
   }
 
   if (url === '/api/wallets') {
@@ -252,7 +293,7 @@ export async function demoAdapter(config) {
       if (num(params.min_score) > 0 && num(w.anomaly_score) < num(params.min_score)) return false;
       return true;
     });
-    return ok(paginate(filtered, params, 'wallets'), config);
+    return ok(paginate(sortRows(filtered, params, 'anomaly_score'), params, 'wallets'), config);
   }
 
   if (url.startsWith('/api/wallets/')) {
@@ -263,7 +304,12 @@ export async function demoAdapter(config) {
 
   if (url === '/api/transactions') {
     const rows = snap.transactions.transactions || [];
-    return ok(paginate(rows, params, 'transactions'), config);
+    const needle = params.search ? String(params.search).toLowerCase() : null;
+    const filtered = needle
+      ? rows.filter((t) => `${t.txid || ''} ${t.src_ip || ''} ${t.dst_ip || ''}`
+        .toLowerCase().includes(needle))
+      : rows;
+    return ok(paginate(sortRows(filtered, params, 'timestamp'), params, 'transactions'), config);
   }
 
   if (url.startsWith('/api/transactions/')) {

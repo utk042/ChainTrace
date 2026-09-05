@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon';
+import Panel from './ui/Panel';
+import { Notice } from './ui/States';
 import {
   swSupported, isControlled, getCacheStatus, clearApiCache, prefetchApi,
 } from '../services/offline';
@@ -101,35 +103,41 @@ export default function OfflinePanel() {
 
   if (!swSupported()) {
     return (
-      <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
-        <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 'var(--space-md)' }}>Offline Availability</h2>
-        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
-          Offline support needs a service worker, which browsers only allow over
-          HTTPS or on localhost. This page is served over an insecure origin, so
-          the interface will not be available without a network. The bundled
-          snapshot below still works, and so does the single-file build
-          (<code>npm run build:standalone</code>).
-        </p>
-      </div>
+      <Panel icon="cloudOff" title="Offline availability" style={{ border: 'none', borderRadius: 0 }}>
+        <div style={{ padding: 'var(--space-md)' }}>
+          <Notice kind="warn">
+            Offline support needs a service worker, which browsers only allow over
+            HTTPS or on localhost. This page is served over an insecure origin, so
+            the interface will not be available without a network. The bundled
+            snapshot below still works, and so does the single-file build
+            (<code>npm run build:standalone</code>).
+          </Notice>
+        </div>
+      </Panel>
     );
   }
 
   const installed = isControlled();
 
   return (
-    <div className="settings-section" style={{ marginBottom: 'var(--space-xl)' }}>
-      <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 4 }}>Offline Availability</h2>
-      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-lg)', lineHeight: 1.6 }}>
-        The interface — every page, chart and font — is stored on this device
-        the first time it loads, so it opens with no network at all. Backend
-        results are stored as you read them and shown with the time they were
-        fetched; they are never presented as live.
-      </p>
+    <Panel
+      icon="cloudOff"
+      title="Offline availability"
+      meta={installed ? 'interface stored on this device' : undefined}
+      style={{ border: 'none', borderRadius: 0 }}
+    >
+      <div style={{ padding: 'var(--space-md)' }}>
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-md)', lineHeight: 1.55 }}>
+          The interface — every page, chart and font — is stored on this device
+          the first time it loads, so it opens with no network at all. Backend
+          results are stored as you read them and shown with the time they were
+          fetched; they are never presented as live.
+        </p>
 
-      <div className="offline-grid">
+        <div className="offline-grid">
         <div className="offline-stat">
           <div className="offline-stat-label">Interface</div>
-          <div className="offline-stat-value" style={{ color: installed ? 'var(--accent-green)' : 'var(--accent-elevated)' }}>
+          <div className="offline-stat-value" style={{ color: installed ? 'var(--status-ok)' : 'var(--risk-elevated)' }}>
             {installed ? 'Available offline' : 'Installing…'}
           </div>
           <div className="offline-stat-sub">{status ? `${status.shellEntries} files` : 'first visit'}</div>
@@ -146,18 +154,19 @@ export default function OfflinePanel() {
         </div>
         <div className="offline-stat">
           <div className="offline-stat-label">Network</div>
-          <div className="offline-stat-value" style={{ color: online ? 'var(--accent-green)' : 'var(--accent-elevated)' }}>
+          <div className="offline-stat-value" style={{ color: online ? 'var(--status-ok)' : 'var(--risk-elevated)' }}>
             {online ? 'Connected' : 'Offline'}
           </div>
           <div className="offline-stat-sub">{online ? 'live reads preferred' : 'reading from storage'}</div>
         </div>
       </div>
 
-      {message && (
-        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', margin: '0 0 var(--space-md)' }}>
-          {message}
-        </p>
-      )}
+        {message && (
+          <div style={{ marginTop: 'var(--space-md)' }}>
+            <Notice kind="info">{message}</Notice>
+          </div>
+        )}
+      </div>
 
       <div className="settings-row">
         <div className="settings-row-info">
@@ -185,7 +194,7 @@ export default function OfflinePanel() {
             <h3>Install as an application</h3>
             <p>Runs in its own window with no browser chrome, and launches from the desktop.</p>
           </div>
-          <button className="btn btn-secondary" onClick={install}>
+          <button className="btn btn-primary" onClick={install}>
             <Icon name="download" size={13} /> Install ChainTrace
           </button>
         </div>
@@ -199,10 +208,10 @@ export default function OfflinePanel() {
             offline, and nothing on the backend is touched.
           </p>
         </div>
-        <button className="btn btn-outline" onClick={clearStored} disabled={busy !== null || !installed}>
+        <button className="btn btn-danger" onClick={clearStored} disabled={busy !== null || !installed}>
           {busy === 'clear' ? 'Clearing…' : <><Icon name="trash" size={13} /> Clear stored data</>}
         </button>
       </div>
-    </div>
+    </Panel>
   );
 }
