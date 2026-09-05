@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query
+from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import get_db
 from app.logging_config import get_logger, log_tail, log_file_path
@@ -360,10 +361,28 @@ async def fetch_real_data(
             max_transactions=max_transactions, max_blocks=max_blocks,
         ))
     except EsploraError as e:
-        return {"error": f"Could not reach Blockstream's API: {e}"}
+        # 502, not 200. This is the one endpoint that cannot work without
+        # outbound internet, and on an air-gapped machine it is *expected* to
+        # fail — but a failure answered with 200 OK is invisible to every
+        # client that checks the status line rather than sniffing the body,
+        # which is how a monitoring check reports an air-gapped install as
+        # healthy while this returns nothing.
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": f"Could not reach Blockstream's API: {e}",
+                "detail": "This is the only feature that needs outbound internet. "
+                          "On an offline machine, fetch the data elsewhere and use "
+                          "Upload, or generate a synthetic dataset instead.",
+            },
+        )
 
     if not records:
-        return {"error": "No usable transactions found in the scanned blocks. Try increasing max_blocks."}
+        return JSONResponse(
+            status_code=502,
+            content={"error": "No usable transactions found in the scanned blocks. "
+                              "Try increasing max_blocks."},
+        )
 
     import sys
     if str(settings.BASE_DIR) not in sys.path:
