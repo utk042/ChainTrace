@@ -40,8 +40,8 @@ def list_alerts(
             conditions.append("entity_type = ?")
             params.append(entity_type)
         if model:
-            conditions.append("model = ?")
-            params.append(model)
+            conditions.append("model LIKE ?")
+            params.append(f"%{model}%")
         if min_confidence > 0:
             conditions.append("confidence >= ?")
             params.append(min_confidence)

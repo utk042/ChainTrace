@@ -264,7 +264,7 @@ code, pre, .mono { font-family: var(--font-mono); }
 
 .gt-app {
   display: grid;
-  grid-template-rows: var(--titlebar-h) var(--menubar-h) minmax(0, 1fr) var(--statusbar-h);
+  grid-template-rows: var(--titlebar-h) var(--menubar-h) minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
   background: var(--bg-app);
@@ -400,6 +400,34 @@ code, pre, .mono { font-family: var(--font-mono); }
   min-width: 0;
 }
 
+.titlebar-tab-add {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.ws-tab-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.ws-tab-add-btn:hover,
+.ws-tab-add-btn.active {
+  background: var(--bg-well);
+  color: var(--text-primary);
+}
+
 .titlebar-right {
   display: flex;
   align-items: center;
@@ -470,6 +498,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   align-items: center;
   gap: var(--space-sm);
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* Classification-style marking. Real deployments put the handling caveat
@@ -496,10 +525,22 @@ code, pre, .mono { font-family: var(--font-mono); }
 
 /* ─── Icon rail ─────────────────────────────────────────────────── */
 
+.rail-wrapper {
+  position: relative;
+  width: var(--rail-w);
+  height: 100%;
+  flex-shrink: 0;
+  z-index: var(--z-dropdown);
+}
+
 .rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 2px;
   width: var(--rail-w);
   padding: var(--space-sm) 0;
@@ -508,10 +549,19 @@ code, pre, .mono { font-family: var(--font-mono); }
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
-  z-index: var(--z-raised);
+  z-index: var(--z-dropdown);
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1) 0s, box-shadow 0.2s ease 0s;
+  white-space: nowrap;
 }
 
 .rail::-webkit-scrollbar { display: none; }
+
+.rail:hover {
+  width: 175px;
+  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.65), 1px 0 0 var(--border);
+  background: var(--bg-chrome);
+  transition-delay: 0.12s;
+}
 
 .rail-spacer { flex: 1; }
 
@@ -519,35 +569,75 @@ code, pre, .mono { font-family: var(--font-mono); }
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: calc(100% - 8px);
+  height: 32px;
+  margin: 0 4px;
+  padding: 0 7px;
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
   flex-shrink: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 
-.rail-item:hover { background: var(--bg-well); color: var(--text-primary); }
+.rail-item:hover {
+  background: var(--bg-well);
+  color: var(--text-primary);
+}
 
-.rail-item.active { background: var(--accent-strong); color: var(--text-on-accent); }
+.rail-item.active {
+  background: var(--accent-strong);
+  color: var(--text-on-accent);
+}
 
-/* The active marker bleeds to the rail edge the way Gotham marks its
-   running application. */
 .rail-item.active::before {
   content: '';
   position: absolute;
-  left: -3px;
-  top: 3px;
-  bottom: 3px;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
   width: 2px;
   background: var(--accent-soft);
+  border-radius: 1px;
 }
 
-.rail-badge {
+.rail-item-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.rail-item-label {
+  margin-left: 10px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: inherit;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.rail:hover .rail-item-label {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.rail-badge-corner {
   position: absolute;
-  top: 1px;
-  right: 1px;
+  top: -4px;
+  right: -6px;
   min-width: 12px;
   height: 12px;
   padding: 0 3px;
@@ -561,27 +651,27 @@ code, pre, .mono { font-family: var(--font-mono); }
   font-weight: 600;
 }
 
-/* A hover label, so a 32px rail is still self-describing. */
-.rail-item .rail-tip {
-  position: absolute;
-  left: calc(100% + 6px);
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 3px var(--space-sm);
-  background: var(--gt-black);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--transition-fast);
-  z-index: var(--z-dropdown);
-  box-shadow: var(--shadow-md);
+.rail:hover .rail-badge-corner {
+  display: none;
 }
 
-.rail-item:hover .rail-tip { opacity: 1; }
+.rail-item-badge {
+  display: none;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--risk-critical);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+}
+
+.rail:hover .rail-item-badge {
+  display: inline-flex;
+  align-items: center;
+}
 
 /* ─── Status bar ────────────────────────────────────────────────── */
 
@@ -1328,8 +1418,20 @@ kbd {
   background: var(--border);
 }
 
+.browser:not(.show-filters) {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
 .browser.has-detail {
   grid-template-columns: var(--pane-filters, 236px) minmax(280px, 1fr) var(--pane-detail, 400px);
+}
+
+.browser:not(.show-filters).has-detail {
+  grid-template-columns: minmax(280px, 1fr) var(--pane-detail, 400px) !important;
+}
+
+.browser:not(.show-filters) .browser-filters {
+  display: none !important;
 }
 
 .browser-pane {
@@ -1627,11 +1729,25 @@ kbd {
 .page-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: var(--space-md);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-md) var(--space-md) var(--space-xl);
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+}
+
+/* Panels placed inside a scrolling document page must not collapse or clip content. */
+.page-scroll .panel {
+  flex: 0 0 auto;
+  min-height: fit-content;
+  overflow: visible;
+}
+
+.page-scroll .panel-body {
+  flex: 0 0 auto;
+  min-height: fit-content;
+  overflow: visible;
 }
 
 .page-toolbar {
@@ -2048,12 +2164,29 @@ button.stat-tile:hover { background: var(--bg-well); }
   overflow: hidden;
 }
 
-/* The find box floats over the canvas, as Gotham's does. */
-.graph-find {
+/* Container for top-floating widgets over the canvas (search & isolation banner). */
+.graph-stage-top {
   position: absolute;
   top: var(--space-md);
   left: var(--space-md);
-  width: min(320px, calc(100% - var(--space-xl)));
+  right: var(--space-md);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  pointer-events: none;
+  z-index: var(--z-float);
+  min-width: 0;
+}
+
+.graph-stage-top > * {
+  pointer-events: auto;
+}
+
+/* The find box floats over the canvas, as Gotham's does. */
+.graph-find {
+  position: relative;
+  width: min(300px, 36vw);
+  flex-shrink: 0;
   z-index: var(--z-float);
 }
 
@@ -2086,13 +2219,17 @@ button.stat-tile:hover { background: var(--bg-well); }
 .graph-find-input input::placeholder { color: var(--text-muted); }
 
 .graph-find-results {
-  margin-top: 2px;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
   background: var(--bg-well);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   max-height: 320px;
   overflow-y: auto;
+  z-index: var(--z-dropdown);
 }
 
 .graph-find-results button {
@@ -2534,7 +2671,7 @@ button.stat-tile:hover { background: var(--bg-well); }
   align-items: center;
   justify-content: center;
   gap: var(--space-sm);
-  padding: var(--space-2xl) var(--space-lg);
+  padding: var(--space-xl) var(--space-lg);
   background: var(--bg-panel);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-md);
@@ -2559,29 +2696,38 @@ button.stat-tile:hover { background: var(--bg-well); }
 
 .step-tracker {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: var(--space-md);
   padding: var(--space-md);
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  min-height: fit-content;
+}
+
+.panel .step-tracker {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: var(--space-md);
 }
 
 .step-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   text-align: center;
   min-width: 0;
+  padding: 0 var(--space-xs);
 }
 
 .step-circle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--bg-control);
   color: var(--text-muted);
@@ -2598,10 +2744,17 @@ button.stat-tile:hover { background: var(--bg-well); }
   font-weight: 600;
   letter-spacing: var(--tracking-label);
   color: var(--text-secondary);
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
-.step-detail { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.4; overflow-wrap: anywhere; }
+.step-detail {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+}
 
 .progress-track {
   height: 4px;
@@ -2881,3 +3034,117 @@ button.stat-tile:hover { background: var(--bg-well); }
   .stat-strip { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
   .graph-find { width: calc(100% - var(--space-xl)); }
 }
+
+/* ═══ Interactivity & Layout Additions ══════════════════════════ */
+
+.menubar-clock {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  padding: 0 var(--space-sm);
+  white-space: nowrap;
+}
+
+.graph-tooltip {
+  min-width: 220px;
+  max-width: 320px;
+  padding: 8px 10px;
+  background: var(--bg-well);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  pointer-events: none;
+  z-index: var(--z-dropdown);
+  backdrop-filter: blur(4px);
+}
+
+.graph-tooltip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.graph-tooltip-type {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--accent);
+}
+
+.graph-tooltip-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 2px;
+  color: #fff;
+}
+
+.graph-tooltip-id {
+  font-size: 11px;
+  color: var(--text-secondary);
+  word-break: break-all;
+  line-height: 1.3;
+}
+
+.graph-tooltip-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.graph-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.graph-tooltip-row .mono {
+  color: var(--text-primary);
+}
+
+.graph-tooltip-hint {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-style: italic;
+}
+
+.isolation-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-md);
+  height: var(--control-h-lg);
+  padding: 0 var(--space-sm) 0 var(--space-md);
+  background: var(--bg-well);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  min-width: 0;
+  max-width: calc(100% - 320px);
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+
+.isolation-banner-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.isolation-banner code {
+  color: var(--accent-soft);
+}
+

@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../Icon';
 import Menu, { MenuItem, MenuSeparator, MenuHeading } from '../ui/Menu';
@@ -16,15 +17,14 @@ function hostOf(url) {
   }
 }
 
-/**
- * The application menu bar.
- *
- * Every item here is wired to something. Items the current view cannot
- * service are rendered disabled rather than silently doing nothing: the page
- * registers the commands it implements (see services/commands.js) and this
- * bar subscribes to that registry, so "Fit to view" is live on the graph and
- * greyed out on a table.
- */
+function useClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
 
 const MENUS = [
   {
@@ -75,15 +75,19 @@ const MENUS = [
 
 export default function MenuBar() {
   const navigate = useNavigate();
-  const { stats, provenance, demo, backend, activeView, openKeys, closeView } = useSession();
-  // Subscribing keeps enablement honest as pages mount and unmount.
+  const { provenance, demo, backend, tabs, activeTabId, switchTab, closeTab, openTab } = useSession();
   const available = useAvailableCommands();
+  const now = useClock();
 
   const enabled = (item) => (item.go ? true : available.includes(item.command));
 
   const activate = (item) => {
-    if (item.go) navigate(item.go);
-    else runCommand(item.command);
+    if (item.go) {
+      const viewKey = item.go.replace('/', '') || 'overview';
+      openTab(viewKey, { forceNew: false });
+    } else {
+      runCommand(item.command);
+    }
   };
 
   const source = demo ? 'snapshot' : provenance.source;
@@ -101,16 +105,9 @@ export default function MenuBar() {
     unknown: 'No data has been loaded in this session yet.',
   }[source];
 
-  // The chip in the middle names what this window is attached to, the way
-  // Gotham's names the document you have open. For us that is the backend
-  // the session is talking to — the thing an operator most often needs to
-  // confirm before trusting a figure.
   const caseName = demo
     ? 'Bundled snapshot'
     : (hostOf(backend.apiUrl) || 'Backend on this origin');
-  const caseMeta = stats?.total_transactions != null
-    ? `${stats.total_transactions.toLocaleString()} transactions`
-    : null;
 
   return (
     <div className="menubar">
@@ -155,24 +152,35 @@ export default function MenuBar() {
         >
           {({ close }) => (
             <>
-              <MenuHeading>Views</MenuHeading>
+              <MenuHeading>Open Tabs</MenuHeading>
+              {tabs.map((tab) => (
+                <MenuItem
+                  key={tab.id}
+                  close={close}
+                  icon={tab.icon}
+                  label={tab.label}
+                  hint={tab.id === activeTabId ? 'active' : undefined}
+                  onSelect={() => switchTab(tab.id)}
+                />
+              ))}
+              <MenuSeparator />
+              <MenuHeading>Open New View</MenuHeading>
               {VIEWS.map((view) => (
                 <MenuItem
                   key={view.key}
                   close={close}
                   icon={view.icon}
                   label={view.label}
-                  hint={view.key === activeView.key ? 'current' : openKeys.includes(view.key) ? 'open' : undefined}
-                  onSelect={() => navigate(view.path)}
+                  onSelect={() => openTab(view.key, { forceNew: true })}
                 />
               ))}
               <MenuSeparator />
               <MenuItem
                 close={close}
                 icon="close"
-                label={`Close ${activeView.label}`}
-                disabled={openKeys.length <= 1}
-                onSelect={() => closeView(activeView.key)}
+                label="Close current tab"
+                disabled={tabs.length <= 1}
+                onSelect={() => closeTab(activeTabId)}
               />
             </>
           )}
@@ -198,7 +206,7 @@ export default function MenuBar() {
                 close={close}
                 icon="shieldCheck"
                 label="Backend health & settings"
-                onSelect={() => navigate('/settings')}
+                onSelect={() => openTab('settings', { forceNew: false })}
               />
               <MenuSeparator />
               <MenuHeading>Session</MenuHeading>
@@ -224,13 +232,10 @@ export default function MenuBar() {
         </Menu>
       </div>
 
-      <div className="menubar-doc" title={caseName}>
-        <Icon name="briefcase" size={12} />
-        <span className="menubar-doc-name">{caseName}</span>
-        {caseMeta && <span className="muted menubar-doc-meta">· {caseMeta}</span>}
-      </div>
-
       <div className="menubar-right">
+        <span className="menubar-clock" title="All timestamps in this tool are UTC">
+          {now.toISOString().replace('T', ' ').slice(0, 19)} UTC
+        </span>
         <span className={`provenance-chip ${source}`} title={sourceTitle}>
           <Icon name={source === 'live' ? 'zap' : source === 'snapshot' ? 'layers' : 'boxDown'} size={10} />
           {sourceLabel}

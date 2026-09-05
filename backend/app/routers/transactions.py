@@ -12,6 +12,7 @@ router = APIRouter(prefix="/api/transactions", tags=["Transactions"])
 @router.get("")
 def list_transactions(
     search: Optional[str] = None,
+    script_type: Optional[str] = None,
     page: int = Query(1, ge=1, description="1-based page number."),
     page_size: int = Query(20, ge=1, le=10_000,
                            description="Rows per page. Bounded so one request cannot pull the whole table into memory."),
@@ -26,6 +27,9 @@ def list_transactions(
         if search:
             conditions.append("(txid LIKE ? OR src_ip LIKE ? OR dst_ip LIKE ?)")
             params.extend([f"%{search}%"] * 3)
+        if script_type:
+            conditions.append("script_type = ?")
+            params.append(script_type)
 
         where = " AND ".join(conditions)
         valid_sorts = ["timestamp", "fee", "txid"]

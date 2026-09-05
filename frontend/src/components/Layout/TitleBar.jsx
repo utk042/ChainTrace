@@ -9,13 +9,12 @@ import { VIEWS } from '../../state/views';
  * The window's title bar: the application mark, global search, and one tab
  * per open view.
  *
- * The tabs are the workstation's own — navigating opens a view and leaves it
- * open, so moving between a wallet list and the graph does not throw away
- * where you were. Closing a tab lands on its neighbour.
+ * Each tab is an independent instance. Adding a tab always creates a new tab
+ * instance, and switching tabs preserves full state without reloading.
  */
 export default function TitleBar() {
   const navigate = useNavigate();
-  const { openKeys, activeView, closeView } = useSession();
+  const { tabs, activeTabId, switchTab, closeTab, openTab } = useSession();
   const [query, setQuery] = useState('');
   const inputRef = useRef(null);
 
@@ -38,10 +37,10 @@ export default function TitleBar() {
     event.preventDefault();
     const q = query.trim();
     if (q.length < 2) return;
-    navigate(`/graph?q=${encodeURIComponent(q)}`);
+    const targetPath = `/graph?q=${encodeURIComponent(q)}`;
+    openTab('graph', { forceNew: false, path: targetPath });
+    navigate(targetPath);
   };
-
-  const openTabs = VIEWS.filter((v) => openKeys.includes(v.key));
 
   return (
     <div className="titlebar">
@@ -63,28 +62,27 @@ export default function TitleBar() {
       </form>
 
       <div className="titlebar-tabs" role="tablist" aria-label="Open views">
-        {openTabs.map((view) => {
-          const active = view.key === activeView.key;
+        {tabs.map((tab) => {
+          const active = tab.id === activeTabId;
           return (
             <div
-              key={view.key}
+              key={tab.id}
               className={`ws-tab${active ? ' active' : ''}`}
               role="tab"
               aria-selected={active}
-              title={view.hint}
-              onClick={() => navigate(view.path)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(view.path); } }}
+              onClick={() => switchTab(tab.id)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchTab(tab.id); } }}
               tabIndex={0}
             >
-              <Icon name={view.icon} size={12} />
-              <span className="ws-tab-label">{view.label}</span>
-              {openTabs.length > 1 && (
+              <Icon name={tab.icon} size={12} />
+              <span className="ws-tab-label">{tab.label}</span>
+              {tabs.length > 1 && (
                 <button
                   type="button"
                   className="icon-btn"
                   style={{ width: 14, height: 14 }}
-                  aria-label={`Close ${view.label}`}
-                  onClick={(e) => { e.stopPropagation(); closeView(view.key); }}
+                  aria-label={`Close ${tab.label}`}
+                  onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
                 >
                   <Icon name="close" size={10} />
                 </button>
@@ -92,47 +90,47 @@ export default function TitleBar() {
             </div>
           );
         })}
-      </div>
 
-      <div className="titlebar-right">
-        <Menu
-          align="right"
-          trigger={({ toggle, open }) => (
-            <button
-              type="button"
-              className={`icon-btn${open ? ' active' : ''}`}
-              onClick={toggle}
-              title="Open a view"
-              aria-label="Open a view"
-            >
-              <Icon name="plus" size={14} />
-            </button>
-          )}
-        >
-          {({ close }) => (
-            <>
-              <MenuHeading>Open a view</MenuHeading>
-              {VIEWS.map((view) => (
+        <div className="titlebar-tab-add">
+          <Menu
+            align="left"
+            trigger={({ toggle, open }) => (
+              <button
+                type="button"
+                className={`ws-tab-add-btn${open ? ' active' : ''}`}
+                onClick={toggle}
+                title="Open a new tab view"
+                aria-label="Open a view"
+              >
+                <Icon name="plus" size={13} />
+              </button>
+            )}
+          >
+            {({ close }) => (
+              <>
+                <MenuHeading>Open a new tab</MenuHeading>
+                {VIEWS.map((view) => (
+                  <MenuItem
+                    key={view.key}
+                    close={close}
+                    icon={view.icon}
+                    label={view.label}
+                    hint={tabs.some((t) => t.key === view.key) ? 'open' : undefined}
+                    onSelect={() => openTab(view.key, { forceNew: true })}
+                  />
+                ))}
+                <MenuSeparator />
                 <MenuItem
-                  key={view.key}
                   close={close}
-                  icon={view.icon}
-                  label={view.label}
-                  hint={openKeys.includes(view.key) ? 'open' : undefined}
-                  onSelect={() => navigate(view.path)}
+                  icon="close"
+                  label="Close current tab"
+                  disabled={tabs.length <= 1}
+                  onSelect={() => closeTab(activeTabId)}
                 />
-              ))}
-              <MenuSeparator />
-              <MenuItem
-                close={close}
-                icon="close"
-                label="Close this view"
-                disabled={openKeys.length <= 1}
-                onSelect={() => closeView(activeView.key)}
-              />
-            </>
-          )}
-        </Menu>
+              </>
+            )}
+          </Menu>
+        </div>
       </div>
     </div>
   );
