@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import Icon from '../Icon';
-import { useBackendStatus } from '../../hooks/useBackendStatus';
-import { isDemoMode, setDemoMode } from '../../services/api';
+import { useSession } from '../../state/SessionProvider';
+import { setDemoMode } from '../../services/api';
 
 /** "20 min ago" / "2026-09-04 12:14 UTC" — enough to judge staleness at a glance. */
 function formatCachedAt(iso) {
@@ -21,8 +21,9 @@ function formatCachedAt(iso) {
  * connected one, naming the problem and the page that fixes it.
  */
 export default function ConnectionBanner() {
-  const { status, apiUrl, error, recheck, cachedAt, online, health } = useBackendStatus();
-  const demo = isDemoMode();
+  // One health poll for the whole window; see state/SessionProvider.
+  const { backend, demo } = useSession();
+  const { status, apiUrl, error, recheck, cachedAt, online, health } = backend;
 
   const enterDemo = () => { setDemoMode(true); window.location.reload(); };
   const leaveDemo = () => { setDemoMode(false); window.location.reload(); };
@@ -38,7 +39,7 @@ export default function ConnectionBanner() {
           are disabled.
         </span>
         <div className="conn-banner-actions">
-          <button onClick={leaveDemo}>Connect to a backend</button>
+          <button className="btn btn-sm" onClick={leaveDemo}>Connect to a backend</button>
         </div>
       </div>
     );
@@ -61,8 +62,8 @@ export default function ConnectionBanner() {
           connection returns.
         </span>
         <div className="conn-banner-actions">
-          <button onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
-          <Link to="/settings">Offline settings</Link>
+          <button className="btn btn-sm" onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
+          <Link className="btn btn-sm btn-outline" to="/settings">Offline settings</Link>
         </div>
       </div>
     );
@@ -88,7 +89,7 @@ export default function ConnectionBanner() {
           )}
         </span>
         <div className="conn-banner-actions">
-          <button onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
+          <button className="btn btn-sm" onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
         </div>
       </div>
     );
@@ -110,8 +111,8 @@ export default function ConnectionBanner() {
           the other process and retry.
         </span>
         <div className="conn-banner-actions">
-          <button onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
-          <Link to="/settings">Settings</Link>
+          <button className="btn btn-sm" onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
+          <Link className="btn btn-sm btn-outline" to="/settings">Settings</Link>
         </div>
       </div>
     );
@@ -128,9 +129,9 @@ export default function ConnectionBanner() {
             : <>No API URL is configured, so requests are going to this site's own domain. On a hosted build set <code>VITE_API_URL</code> at build time, or point this build at a backend in Settings.</>)}
         </span>
         <div className="conn-banner-actions">
-          <button onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
-          <button onClick={enterDemo}>Use snapshot</button>
-          <Link to="/settings">Settings</Link>
+          <button className="btn btn-sm" onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
+          <button className="btn btn-sm" onClick={enterDemo}>Use snapshot</button>
+          <Link className="btn btn-sm btn-outline" to="/settings">Settings</Link>
         </div>
       </div>
     );
@@ -145,7 +146,7 @@ export default function ConnectionBanner() {
         to populate it.
       </span>
       <div className="conn-banner-actions">
-        <Link to="/ingest">Go to Ingest</Link>
+        <Link className="btn btn-sm btn-outline" to="/ingest">Go to Ingest</Link>
       </div>
     </div>
   );
