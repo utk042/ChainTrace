@@ -275,15 +275,31 @@ restarts.
 
 All five forensic thresholds on the Settings page (Mixer Confidence, Darknet Proximity Hops, Velocity Spike Threshold, Round-Amount Threshold, Anomaly Percentile) are read live by the detectors above — editing one and re-running the pipeline changes real detection behavior, not just a stored value.
 
-## 🖥 Dashboard Pages
+## 🖥 The workstation
 
-- **Dashboard** — KPIs, activity timeline, risk distribution, top alerts
-- **Alerts** — Filterable alert table with SHAP feature bars and per-detector labels (Peel-Chain, CoinJoin, Mixer-Hub, Risk-Propagation, Autoencoder)
+The interface is laid out as an analyst workstation rather than a web
+dashboard: a fixed title bar carrying global search and one tab per open
+view, an application menu bar whose items are enabled only where the current
+view implements them, an icon rail down the left edge, and a status bar
+along the bottom carrying the connection state, the dataset counters and a
+UTC clock. Only the workspace between them ever scrolls.
+
+Most views use the same three-pane arrangement — **filters**, **results**,
+**detail** — with the detail pane draggable and its width remembered per
+view. Side panels fold into overlays on a narrow window rather than
+squeezing the table.
+
+- **Overview** — KPI tiles, activity timeline, wallet-risk make-up, prioritised alerts, and a histogram panel whose rows link through to the filtered view they describe
+- **Alerts** — Three-pane triage: server-side filters (tier, disposition, confidence floor, entity type, model), sortable columns, and a detail pane with the model's SHAP explanation and a disposition control that writes straight to the backend
 - **Graph Explorer** — Interactive Sigma.js link chart: ranked entity search, node/risk filtering, incremental expansion, shortest-path tracing between two entities, a full entity inspector, client-side force re-layout, PNG/JSON export and keyboard shortcuts (see below)
-- **Wallets** — Wallet browser with detail panel: pattern badges (peeling chain / mixer / seed proximity), a risk-score gauge, and a Node2Vec-powered "Similar Wallets" panel
-- **Transactions** — Transaction browser with I/O flow
+- **Wallets** — Wallet browser with a tabbed detail pane (Overview / Features / Links / Transactions): pattern badges (peeling chain / mixer / seed proximity), an anomaly-score meter, and a Node2Vec-powered "Similar wallets" list. The address under review lives in the URL, so it survives a reload and can be linked to
+- **Transactions** — Ledger browser with a tabbed detail pane (Overview / Inputs / Outputs / Network) and a summary panel over the loaded page
 - **Ingest** — File upload, synthetic sample generation, or a live fetch of real Blockstream data, then pipeline execution
-- **Settings** — Forensic threshold configuration (all five thresholds are live), a Seed Watchlist tab for maintaining known-illicit wallets that risk propagation spreads from, and an **Offline & Data** tab for installing the app, storing data for offline use and inspecting what is stored
+- **Settings** — Forensic threshold configuration (all five thresholds are live) behind a pinned action bar, a Seed watchlist section for maintaining known-illicit wallets that risk propagation spreads from, and an **Offline & data** section for installing the app, storing data for offline use and inspecting what is stored
+
+Figures drawn from the page currently loaded — the facet histograms beside a
+result list — are labelled *this page*, never presented as a census of the
+whole table.
 
 ### Graph Explorer
 
@@ -295,6 +311,14 @@ All five forensic thresholds on the Settings page (Mixer Confidence, Darknet Pro
 | Trace a connection | **Trace** on any node, then paste a second identifier: the shortest path between the two is computed and highlighted hop by hop. |
 | Focus the view | **Fit** (`F`) frames the whole graph; **Centre** (`C`) re-centres the selection; **Reset** (`R`) restores the original graph, clears filters and selection, and re-frames. |
 | Reduce clutter | **Filters** toggles node types and sets a minimum anomaly score. Applied instantly client-side — no refetch. |
+| Read the make-up | The **Histogram** panel counts what is actually on the canvas by object type and risk tier; clicking an object-type row toggles it, so the figure beside a type is always the number you are looking at. |
+
+Nodes are drawn as square pictogram tiles with the label centred underneath,
+the way the Gotham graph application draws its objects: the tile carries a
+glyph for the entity type, so what you are looking at is legible before you
+read a single identifier. The tile is filled with the node's risk colour, and
+identifiers are middle-elided in the label — a canvas of 60-character
+addresses printed in full is unreadable at any zoom.
 | Untangle | **Re-layout** (`L`) runs ForceAtlas2 over the current view in the browser. The layout dropdown re-runs a server-side layout instead. |
 | Take it with you | Export the view as PNG or JSON. |
 
@@ -348,16 +372,21 @@ Prototype/
         ├── pages/            # 7 pages
         ├── components/
         │   ├── Graph/        # Sigma canvas + node inspector
-        │   ├── Layout/       # Sidebar, top bar, status bar, banners, update prompt
+        │   ├── Layout/       # Title bar, menu bar, rail, status bar, browser layout
+        │   ├── ui/           # Panel, Tabs, Menu, Histogram, Collapse, states
         │   ├── Icon.jsx      # Hand-authored 24x24 icon set
         │   ├── OfflinePanel.jsx  # Install, store-for-offline and cache controls
         │   └── ErrorBoundary.jsx # Keeps one page's crash out of the whole app
         ├── sw/
         │   └── service-worker.js # Precache + API caching; emitted to /sw.js at build
-        ├── hooks/            # useBackendStatus, useOnline, useDebouncedValue
+        ├── state/            # Session provider (one health poll) and the view table
+        ├── hooks/            # useBackendStatus, useOnline, useDebouncedValue,
+        │                     # useResizablePane, useMediaQuery
         ├── demo/             # Bundled pipeline snapshot for snapshot mode
         └── services/
             ├── api.js        # API client + cache-provenance tracking
+            ├── commands.js   # Menu-bar command registry (pages register what they can do)
+            ├── format.js     # One definition each for identifier, figure and date display
             ├── demoAdapter.js  # Serves the bundled snapshot through axios
             └── offline.js    # Service-worker lifecycle and cache controls
 ```

@@ -70,8 +70,8 @@ const stopServer = (server) => new Promise((resolve) => {
 
 /** The shell is up and the route produced page-level content. */
 async function rendered(page) {
-  const shell = await page.locator('.sidebar').count();
-  const content = await page.locator('.page-content, canvas').count();
+  const shell = await page.locator('.rail').count();
+  const content = await page.locator('.page, .graph-page, canvas').count();
   return shell === 1 && content >= 1;
 }
 
@@ -87,7 +87,7 @@ page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 try {
   // ── Online ────────────────────────────────────────────────────────
   await page.goto(BASE, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.sidebar', { timeout: 20000 });
+  await page.waitForSelector('.rail', { timeout: 20000 });
   for (const route of ROUTES) {
     await page.goto(BASE + route, { waitUntil: 'networkidle' });
     await page.waitForTimeout(route === '/graph' ? 3500 : 700);
@@ -113,11 +113,11 @@ try {
 
   // ── Warm the API cache through the Settings control ───────────────
   await page.goto(`${BASE}/settings`, { waitUntil: 'networkidle' });
-  await page.getByText('Offline & Data').click();
+  await page.getByRole('button', { name: /Offline & data/i }).click();
   await page.waitForTimeout(500);
   await page.getByRole('button', { name: /Save for offline/i }).click();
   await page.waitForTimeout(6000);
-  const stored = await page.locator('.settings-section p')
+  const stored = await page.locator('.notice')
     .filter({ hasText: /Stored \d+/ }).first().textContent().catch(() => null);
   check(/Stored \d+ datasets for offline/.test(stored || ''), 'save-for-offline stores datasets', stored?.trim());
 
@@ -140,8 +140,8 @@ try {
   const banner = await page.locator('.conn-banner-offline').textContent().catch(() => null);
   check(/stored results/i.test(banner || ''), 'banner labels the data as stored',
     banner?.replace(/\s+/g, ' ').trim().slice(0, 90));
-  const pill = await page.locator('.topbar-status').textContent().catch(() => null);
-  check(/OFFLINE/.test(pill || ''), 'header pill reports offline', pill?.trim());
+  const pill = await page.locator('.statusbar-group').first().textContent().catch(() => null);
+  check(/OFFLINE/.test(pill || ''), 'status bar reports offline', pill?.trim());
 
   const kpi = await page.locator('.stat-value').first().textContent().catch(() => null);
   check(kpi && !['0', '—', '-'].includes(kpi.trim()), 'dashboard shows stored figures', kpi?.trim());
@@ -159,8 +159,8 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' }).catch(() => {});
   await page.waitForTimeout(3200);
   check(await page.locator('.conn-banner').count() === 0, 'banner clears when the backend answers');
-  check(/LIVE/.test(await page.locator('.topbar-status').textContent().catch(() => '')),
-    'header pill returns to live');
+  check(/CONNECTED/.test(await page.locator('.statusbar-group').first().textContent().catch(() => '')),
+    'status bar returns to connected');
 } finally {
   await browser.close();
   if (server) await stopServer(server);

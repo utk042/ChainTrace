@@ -1,10 +1,14 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import Sidebar from './components/Layout/Sidebar';
-import TopBar from './components/Layout/TopBar';
+import TitleBar from './components/Layout/TitleBar';
+import MenuBar from './components/Layout/MenuBar';
+import Rail from './components/Layout/Rail';
+import StatusBar from './components/Layout/StatusBar';
 import ConnectionBanner from './components/Layout/ConnectionBanner';
 import UpdatePrompt from './components/Layout/UpdatePrompt';
 import ErrorBoundary from './components/ErrorBoundary';
+import { SessionProvider } from './state/SessionProvider';
+import { Loading } from './components/ui/States';
 
 // Code-split so a page downloads only what it uses: ECharts (1.1 MB) is
 // needed by the Dashboard alone, Sigma by the Graph Explorer alone. The
@@ -22,25 +26,26 @@ const Settings = lazy(() => import('./pages/Settings'));
 // index.html, so it routes through the hash. Every other build uses paths.
 const Router = import.meta.env.VITE_HASH_ROUTER === 'true' ? HashRouter : BrowserRouter;
 
-function RouteFallback() {
+/**
+ * The workstation shell: a fixed title bar, menu bar, application rail and
+ * status bar around one scrolling workspace.
+ *
+ * Only the workspace ever scrolls. The chrome is laid out as grid rows of a
+ * full-height frame rather than as sticky elements, so a long table cannot
+ * push the status bar off the bottom of the window or slide under the menu.
+ */
+function Shell() {
   return (
-    <div className="loading-spinner">
-      <div className="spinner" />
-    </div>
-  );
-}
-
-export default function App() {
-  return (
-    <Router>
-      <div className="app-layout">
-        <Sidebar />
-        <div className="main-content">
-          <TopBar />
+    <div className="gt-app">
+      <TitleBar />
+      <MenuBar />
+      <div className="gt-body">
+        <Rail />
+        <main className="gt-workspace">
           <ConnectionBanner />
           {/* Keyed per route so a crash on one page clears when you leave it. */}
           <ErrorBoundary>
-            <Suspense fallback={<RouteFallback />}>
+            <Suspense fallback={<div className="gt-route"><Loading label="Opening view…" /></div>}>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/alerts" element={<Alerts />} />
@@ -50,14 +55,25 @@ export default function App() {
                 <Route path="/ingest" element={<Ingest />} />
                 <Route path="/settings" element={<Settings />} />
                 {/* A deep link into an installed app can outlive the route
-                    it pointed at; land on the dashboard rather than blank. */}
+                    it pointed at; land on the overview rather than blank. */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>
           </ErrorBoundary>
-        </div>
-        <UpdatePrompt />
+        </main>
       </div>
+      <StatusBar />
+      <UpdatePrompt />
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Router>
+      <SessionProvider>
+        <Shell />
+      </SessionProvider>
     </Router>
   );
 }
