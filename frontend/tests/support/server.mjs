@@ -12,6 +12,7 @@
 import http from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
+import { REQUIRED_API_REVISION } from '../../src/services/apiContract.js';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -38,7 +39,12 @@ const paginate = (rows, key, params) => {
 /** The subset of the API the offline test exercises, from the snapshot. */
 function fromSnapshot(snapshot, pathname, params) {
   switch (pathname) {
-    case '/api/health': return { ...snapshot.health, status: 'healthy' };
+    // This stub stands in for a current backend, so it advertises the
+    // revision this build expects. The snapshot's own health blob predates
+    // the field, and without stamping it the app would — correctly — report
+    // the stub as a server running older code.
+    case '/api/health':
+      return { ...snapshot.health, status: 'healthy', api_revision: REQUIRED_API_REVISION };
     case '/api/dashboard/stats': return snapshot.dashboard.stats;
     case '/api/dashboard/timeline': return snapshot.dashboard.timeline;
     case '/api/dashboard/risk-distribution': return snapshot.dashboard.risk_distribution;

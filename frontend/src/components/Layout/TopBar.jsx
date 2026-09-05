@@ -24,6 +24,7 @@ const CONNECTION = {
   ready: { label: 'CONNECTED · LIVE', color: 'var(--accent-green)' },
   empty: { label: 'CONNECTED · NO DATA', color: 'var(--accent-elevated)' },
   degraded: { label: 'CONNECTED · DB ERROR', color: 'var(--accent-critical)' },
+  stale: { label: 'BACKEND OUT OF DATE', color: 'var(--accent-critical)' },
   offline: { label: 'OFFLINE · STORED DATA', color: 'var(--accent-elevated)' },
   down: { label: 'BACKEND OFFLINE', color: 'var(--accent-critical)' },
 };

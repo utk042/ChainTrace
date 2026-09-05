@@ -21,6 +21,7 @@ Two reasons this module exists rather than `print()`:
    Ingest page.
 """
 
+import errno
 import logging
 import logging.handlers
 import sys
@@ -94,6 +95,94 @@ class RingBufferHandler(logging.Handler):
 ring_handler = RingBufferHandler()
 
 
+class _EpipeTolerantStream:
+    """
+    A stdout/stderr wrapper whose writes cannot raise a dead-pipe error.
+
+    Converting our own `print()` calls to logging fixed the sites we knew
+    about, but it did not close the hole: any third-party library that
+    prints, any call site added later, and uvicorn's own startup output all
+    still write to a raw stream, and on a dead pipe every one of them raises
+    `BrokenPipeError` (EPIPE) or, on a closed pty, `OSError: [Errno 5]`
+    (EIO). Inside a request handler or a background pipeline that is
+    indistinguishable from a real failure — which is exactly how a
+    ChainTrace run came to die reporting "[Errno 32] Broken pipe".
+
+    Losing console output when nothing is reading it is not a loss: the file
+    handler and the in-memory ring still record everything, and the log
+    survives in `data/logs/` and at `/api/logs`. So writes to a stream with
+    no reader are dropped rather than raised.
+
+    Everything other than write/flush delegates to the real stream, so code
+    that inspects `encoding`, `fileno()` or `isatty()` still sees the truth.
+    """
+
+    # Dead reader (EPIPE) and closed terminal (EIO). Anything else — a full
+    # disk, say — is a genuine problem and is left to propagate.
+    _SILENT_ERRNOS = frozenset({errno.EPIPE, errno.EIO})
+
+    def __init__(self, stream):
+        self._stream = stream
+        self.broken = False
+
+    def write(self, data):
+        if self.broken:
+            return len(data)
+        try:
+            return self._stream.write(data)
+        except OSError as exc:
+            if exc.errno in self._SILENT_ERRNOS:
+                # Latch, so we stop paying for a syscall per write for the
+                # rest of the process's life.
+                self.broken = True
+                return len(data)
+            raise
+        except ValueError:
+            # "I/O operation on closed file" — same situation, different
+            # exception type when the stream object itself has been closed.
+            self.broken = True
+            return len(data)
+
+    def flush(self):
+        if self.broken:
+            return
+        try:
+            self._stream.flush()
+        except OSError as exc:
+            if exc.errno in self._SILENT_ERRNOS:
+                self.broken = True
+                return
+            raise
+        except ValueError:
+            self.broken = True
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def _protect_std_streams() -> None:
+    """
+    Make stdout and stderr survive losing their reader.
+
+    Installed before anything else writes, and idempotent so a re-import or a
+    second `configure_logging()` does not wrap a wrapper.
+    """
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is None or isinstance(stream, _EpipeTolerantStream):
+            continue
+        setattr(sys, name, _EpipeTolerantStream(stream))
+
+
+def std_streams_broken() -> bool:
+    """True once a write to stdout/stderr has been dropped for a dead reader."""
+    return any(
+        isinstance(getattr(sys, name, None), _EpipeTolerantStream)
+        and getattr(sys, name).broken
+        for name in ("stdout", "stderr")
+    )
+
+
 def configure_logging(level: int = logging.INFO) -> None:
     """
     Install ChainTrace's handlers on the root logger. Idempotent, so calling
@@ -103,6 +192,10 @@ def configure_logging(level: int = logging.INFO) -> None:
     with _configure_lock:
         if _configured:
             return
+
+        # Before any handler is attached, so nothing can write to a raw
+        # stream that might already be dead.
+        _protect_std_streams()
 
         formatter = logging.Formatter(_FORMAT, datefmt=_DATE_FORMAT)
         root = logging.getLogger()

@@ -21,7 +21,7 @@ function formatCachedAt(iso) {
  * connected one, naming the problem and the page that fixes it.
  */
 export default function ConnectionBanner() {
-  const { status, apiUrl, error, recheck, cachedAt, online } = useBackendStatus();
+  const { status, apiUrl, error, recheck, cachedAt, online, health } = useBackendStatus();
   const demo = isDemoMode();
 
   const enterDemo = () => { setDemoMode(true); window.location.reload(); };
@@ -63,6 +63,32 @@ export default function ConnectionBanner() {
         <div className="conn-banner-actions">
           <button onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
           <Link to="/settings">Offline settings</Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Reachable, but running code older than this frontend. Named explicitly,
+  // with the process to kill, because the alternative is an operator
+  // debugging a bug that is already fixed on disk.
+  if (status === 'stale') {
+    return (
+      <div className="conn-banner conn-banner-error">
+        <Icon name="alertTriangle" size={13} />
+        <span>
+          <b>Backend is running older code</b> — {error} A server keeps its code
+          in memory, so one started before the last change — or orphaned when its
+          terminal closed — keeps answering with the old behaviour while this page
+          hot-reloads the new one.{' '}
+          {health?.pid && (
+            <>
+              Restart it: <code>kill {health.pid}</code>, then start it again
+              {health.started_at ? ` (this one has been up since ${health.started_at.replace('T', ' ')})` : ''}.
+            </>
+          )}
+        </span>
+        <div className="conn-banner-actions">
+          <button onClick={recheck}><Icon name="refresh" size={12} /> Retry</button>
         </div>
       </div>
     );
