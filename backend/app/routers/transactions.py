@@ -2,7 +2,7 @@
 ChainTrace Forensics — Transactions Router
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from app.database import get_db_readonly
 from typing import Optional
 
@@ -77,7 +77,7 @@ def get_transaction_detail(txid: str):
         """, [txid]).fetchone()
 
         if not row:
-            return {"error": "Transaction not found"}
+            raise HTTPException(status_code=404, detail=f"No transaction '{txid}' in the current dataset.")
 
         total_in = sum(row[8]) if row[8] else 0
         total_out = sum(row[9]) if row[9] else 0
