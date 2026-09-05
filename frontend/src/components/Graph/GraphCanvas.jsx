@@ -1,10 +1,37 @@
-import { useEffect, useRef, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { SigmaContainer, useLoadGraph, useSigma, useRegisterEvents } from '@react-sigma/core';
 import Graph from 'graphology';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
+import { EdgeArrowProgram, createEdgeArrowProgram } from 'sigma/rendering';
 import { CANVAS, nodeColor, edgeColor } from '../../theme';
+import { riskVar } from '../../services/format';
 import { NodeTileProgram } from './nodeRenderer';
 import { glyphFor } from './nodeGlyphs';
+
+/**
+ * Slender, sharp directional arrow program.
+ * Compact proportions ensure converging arrows never fuse into a solid clump
+ * or obscure node labels underneath.
+ */
+const ArrowProgram = createEdgeArrowProgram({
+  lengthToThicknessRatio: 1.6,
+  widenessToThicknessRatio: 1.15,
+});
+
+/** Converts hex or rgba colors to a semi-transparent rgba string. */
+function toAlphaColor(color, alpha = 0.4) {
+  if (!color) return `rgba(95, 107, 124, ${alpha})`;
+  if (color.startsWith('rgba')) {
+    return color.replace(/[\d.]+\)$/, `${alpha})`);
+  }
+  if (color.startsWith('#')) {
+    let hex = color.slice(1);
+    if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+    const num = parseInt(hex, 16);
+    return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`;
+  }
+  return color;
+}
 
 /**
  * Tiles have to stay big enough for their pictogram to read. Degree still
@@ -34,11 +61,45 @@ function nodeLabel(value) {
  * stay an overlay, never a branch that removes the canvas.
  */
 
+/**
+ * Checks whether a Sigma instance is fully alive with mounted WebGL contexts
+ * and registered programs. Prevents calling refresh/resize on unmounted or
+ * killed instances during React StrictMode or HMR transitions.
+ */
+function isSigmaAlive(sigma) {
+  try {
+    return Boolean(
+      sigma &&
+      sigma.getContainer?.() &&
+      sigma.webGLContexts?.nodes &&
+      sigma.webGLContexts?.edges &&
+      sigma.nodePrograms &&
+      (sigma.nodePrograms.tile || sigma.nodePrograms.def)
+    );
+  } catch {
+    return false;
+  }
+}
+
 const SIGMA_SETTINGS = {
   // Square pictogram tiles with the label underneath, as in the Gotham graph
   // application. See nodeRenderer.js.
   defaultNodeType: 'tile',
-  nodeProgramClasses: { tile: NodeTileProgram },
+  // Register both 'tile' and 'def' to prevent Sigma from unregistering 'def'
+  // and triggering an internal program corruption bug.
+  nodeProgramClasses: {
+    tile: NodeTileProgram,
+    def: NodeTileProgram,
+  },
+  nodeHoverProgramClasses: {
+    tile: NodeTileProgram,
+    def: NodeTileProgram,
+  },
+  defaultEdgeType: 'arrow',
+  edgeProgramClasses: {
+    arrow: ArrowProgram,
+    def: ArrowProgram,
+  },
   defaultNodeColor: CANVAS.highlight,
   defaultEdgeColor: CANVAS.edge,
   labelColor: { color: CANVAS.label },
@@ -61,6 +122,7 @@ const SIGMA_SETTINGS = {
   // inflating every node until it swallows its neighbours.
   zoomToSizeRatioFunction: (ratio) => Math.sqrt(ratio),
   itemSizesReference: 'positions',
+  minEdgeThickness: 0.35,
   autoRescale: true,
   // Sigma throws if constructed before its container has a measured width,
   // which happens when the canvas mounts ahead of layout. The ResizeObserver
@@ -83,12 +145,14 @@ function GraphLoader({ graphData, onGraphLoaded }) {
 
   useEffect(() => {
     if (!graphData) return;
+    if (!isSigmaAlive(sigma)) return;
 
-    const graph = new Graph({ multi: false, type: 'undirected' });
+    const graph = new Graph({ multi: false, type: 'directed' });
 
     (graphData.nodes || []).forEach((node) => {
       if (graph.hasNode(node.id)) return;
       graph.addNode(node.id, {
+        type: 'tile',
         x: typeof node.x === 'number' ? node.x : Math.random() * 1000 - 500,
         y: typeof node.y === 'number' ? node.y : Math.random() * 1000 - 500,
         size: tileSize(node.size),
@@ -107,21 +171,23 @@ function GraphLoader({ graphData, onGraphLoaded }) {
 
     (graphData.edges || []).forEach((edge) => {
       if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
-      if (graph.hasEdge(edge.source, edge.target)) return;
+      if (graph.hasEdge(edge.id) || graph.hasEdge(edge.source, edge.target)) return;
+      const edgeCol = toAlphaColor(edgeColor(edge.edge_type), 0.38);
       graph.addEdgeWithKey(edge.id, edge.source, edge.target, {
-        color: edgeColor(edge.edge_type),
-        baseColor: edgeColor(edge.edge_type),
-        // Tiles are larger than the old discs and cover more of the link, so
-        // an edge thin enough to disappear behind them leaves a dense cluster
-        // reading as a heap of unconnected squares.
-        size: Math.min(2, 0.9 + (edge.weight || 1) * 0.15),
+        color: edgeCol,
+        baseColor: edgeCol,
+        size: 0.45,
         edge_type: edge.edge_type,
+        type: 'arrow',
       });
     });
 
-    loadGraph(graph);
-    // The camera otherwise keeps its position from the previous graph.
-    sigma.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+    try {
+      loadGraph(graph);
+      sigma.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+    } catch (err) {
+      console.warn('loadGraph failed:', err);
+    }
     onGraphLoaded?.(graph);
   }, [graphData, loadGraph, sigma, onGraphLoaded]);
 
@@ -133,7 +199,7 @@ function ResizeHandler() {
   const sigma = useSigma();
 
   useEffect(() => {
-    const container = sigma.getContainer();
+    const container = sigma?.getContainer?.();
     if (!container || typeof ResizeObserver === 'undefined') return;
 
     // Sigma only re-reads its dimensions on window resize, so it misses
@@ -144,8 +210,13 @@ function ResizeHandler() {
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        sigma.resize();
-        sigma.refresh();
+        if (!isSigmaAlive(sigma)) return;
+        try {
+          sigma.resize();
+          sigma.refresh();
+        } catch (err) {
+          console.warn('sigma resize/refresh skipped:', err);
+        }
       });
     });
 
@@ -169,13 +240,15 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
   const focusNode = hovered || selected;
 
   const neighborSet = useMemo(() => {
-    if (!focusNode) return null;
+    if (!focusNode || !isSigmaAlive(sigma)) return null;
     const graph = sigma.getGraph();
     if (!graph.hasNode(focusNode)) return null;
     return new Set([focusNode, ...graph.neighbors(focusNode)]);
   }, [focusNode, sigma, searchMatches]);
 
   useEffect(() => {
+    if (!isSigmaAlive(sigma)) return;
+
     const typeFilter = filters?.types;
     const minScore = filters?.minScore || 0;
     const hasPath = pathNodes && pathNodes.size > 0;
@@ -249,13 +322,24 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
         }
       }
 
+      if (minScore > 0) {
+        const sScore = graph.getNodeAttribute(source, 'anomaly_score') || 0;
+        const tScore = graph.getNodeAttribute(target, 'anomaly_score') || 0;
+        if (sScore < minScore || tScore < minScore) {
+          res.hidden = true;
+          return res;
+        }
+      }
+
       if (hasPath) {
         if (pathEdges.has(`${source}\u0000${target}`)) {
           res.color = PATH_EDGE;
-          res.size = 2.5;
+          res.size = 0.95;
+          res.type = 'arrow';
           res.zIndex = 2;
         } else {
-          res.color = DIM_EDGE;
+          res.color = 'rgba(40, 48, 58, 0.12)';
+          res.size = 0.3;
           res.zIndex = 0;
         }
         return res;
@@ -263,11 +347,13 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
 
       if (neighborSet) {
         if (source === focusNode || target === focusNode) {
-          res.color = HIGHLIGHT_EDGE;
-          res.size = Math.max(1.2, data.size);
+          res.color = 'rgba(76, 144, 240, 0.72)';
+          res.size = 0.75;
+          res.type = 'arrow';
           res.zIndex = 1;
         } else {
-          res.color = DIM_EDGE;
+          res.color = 'rgba(40, 48, 58, 0.12)';
+          res.size = 0.3;
           res.zIndex = 0;
         }
       }
@@ -275,23 +361,111 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
       return res;
     });
 
-    sigma.refresh();
+    if (isSigmaAlive(sigma)) {
+      try {
+        sigma.refresh();
+      } catch (err) {
+        console.warn('sigma.refresh skipped in Reducers:', err);
+      }
+    }
   }, [sigma, hovered, selected, filters, pathEdges, pathNodes, searchMatches, neighborSet, focusNode]);
 
   return null;
 }
 
-function Events({ onNodeClick, onNodeHover, onStageClick }) {
+function NodeInteractions({ onNodeClick, onNodeDoubleClick, onNodeHover, onStageClick, onTooltipChange }) {
   const registerEvents = useRegisterEvents();
+  const sigma = useSigma();
+  const draggedNodeRef = useRef(null);
+  const isDraggingRef = useRef(false);
 
   useEffect(() => {
+    if (!isSigmaAlive(sigma)) return;
+    const container = sigma.getContainer();
+    if (!container) return;
+
+    const handleMouseMove = (e) => {
+      if (!draggedNodeRef.current) return;
+      isDraggingRef.current = true;
+      const rect = container.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const graphPos = sigma.viewportToGraph({ x: mouseX, y: mouseY });
+      const graph = sigma.getGraph();
+      if (graph.hasNode(draggedNodeRef.current)) {
+        graph.setNodeAttribute(draggedNodeRef.current, 'x', graphPos.x);
+        graph.setNodeAttribute(draggedNodeRef.current, 'y', graphPos.y);
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (draggedNodeRef.current) {
+        draggedNodeRef.current = null;
+        container.style.cursor = 'grab';
+        setTimeout(() => {
+          isDraggingRef.current = false;
+        }, 60);
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
     registerEvents({
-      clickNode: ({ node }) => onNodeClick?.(node),
-      enterNode: ({ node }) => onNodeHover?.(node),
-      leaveNode: () => onNodeHover?.(null),
-      clickStage: () => onStageClick?.(),
+      downNode: (e) => {
+        draggedNodeRef.current = e.node;
+        isDraggingRef.current = false;
+        container.style.cursor = 'grabbing';
+        e.preventSigmaDefault();
+      },
+      clickNode: (e) => {
+        if (!isDraggingRef.current) {
+          onNodeClick?.(e.node);
+        }
+      },
+      doubleClickNode: (e) => {
+        e.preventSigmaDefault();
+        onNodeDoubleClick?.(e.node);
+      },
+      enterNode: (e) => {
+        if (!draggedNodeRef.current) {
+          container.style.cursor = 'pointer';
+        }
+        onNodeHover?.(e.node);
+        const graph = sigma.getGraph();
+        if (graph.hasNode(e.node)) {
+          const attrs = graph.getNodeAttributes(e.node);
+          const rect = container.getBoundingClientRect();
+          const orig = e.event.original;
+          const clientX = orig ? orig.clientX : (e.event.x + rect.left);
+          const clientY = orig ? orig.clientY : (e.event.y + rect.top);
+          onTooltipChange?.({
+            id: e.node,
+            attrs,
+            x: clientX,
+            y: clientY,
+          });
+        }
+      },
+      leaveNode: () => {
+        if (!draggedNodeRef.current) {
+          container.style.cursor = 'grab';
+        }
+        onNodeHover?.(null);
+        onTooltipChange?.(null);
+      },
+      clickStage: () => {
+        onStageClick?.();
+      },
     });
-  }, [registerEvents, onNodeClick, onNodeHover, onStageClick]);
+
+    container.style.cursor = 'grab';
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [sigma, registerEvents, onNodeClick, onNodeDoubleClick, onNodeHover, onStageClick, onTooltipChange]);
 
   return null;
 }
@@ -300,16 +474,45 @@ function Events({ onNodeClick, onNodeHover, onStageClick }) {
 function Controller({ controlRef, onLayoutRunning }) {
   const sigma = useSigma();
 
-  const focusOn = useCallback((nodeId, ratio = 0.28) => {
+  const focusOn = useCallback((nodeId, customRatio) => {
+    if (!isSigmaAlive(sigma)) return false;
     const graph = sigma.getGraph();
     if (!graph.hasNode(nodeId)) return false;
+
+    // Ensure container dimensions are up to date if tab was just unhidden
+    const container = sigma.getContainer();
+    if (container && (container.offsetWidth > 0 || container.offsetHeight > 0)) {
+      const dims = sigma.getDimensions();
+      if (dims.width === 0 || dims.height === 0) {
+        try {
+          sigma.resize();
+          sigma.refresh();
+        } catch {}
+      }
+    }
+
     // Read through the renderer, not the graph: Sigma rescales the layout
     // into its own display space, so raw x/y would aim off-canvas.
-    const pos = sigma.getNodeDisplayData(nodeId);
+    let pos = sigma.getNodeDisplayData(nodeId);
+    if (!pos) {
+      try {
+        sigma.refresh();
+        pos = sigma.getNodeDisplayData(nodeId);
+      } catch {}
+    }
     if (!pos) return false;
+
+    const currentRatio = sigma.getCamera().getState().ratio;
+    // Deep zoom into the selected node (0.075) so that the entity, its pictogram,
+    // and its immediate connections are prominent and comfortable to inspect.
+    // If already zoomed in closer (< 0.09), preserve the current zoom level.
+    const ratio = typeof customRatio === 'number'
+      ? customRatio
+      : (currentRatio < 0.09 ? currentRatio : 0.075);
+
     sigma.getCamera().animate(
       { x: pos.x, y: pos.y, ratio },
-      { duration: 480, easing: 'quadraticInOut' },
+      { duration: 420, easing: 'quadraticInOut' },
     );
     return true;
   }, [sigma]);
@@ -317,13 +520,21 @@ function Controller({ controlRef, onLayoutRunning }) {
   useEffect(() => {
     controlRef.current = {
       focusOn,
-      fit: () => sigma.getCamera().animate(
-        { x: 0.5, y: 0.5, ratio: 1, angle: 0 },
-        { duration: 420, easing: 'quadraticInOut' },
-      ),
-      zoomIn: () => sigma.getCamera().animatedZoom({ duration: 200 }),
-      zoomOut: () => sigma.getCamera().animatedUnzoom({ duration: 200 }),
+      fit: () => {
+        if (!isSigmaAlive(sigma)) return;
+        sigma.getCamera().animate(
+          { x: 0.5, y: 0.5, ratio: 1, angle: 0 },
+          { duration: 420, easing: 'quadraticInOut' },
+        );
+      },
+      zoomIn: () => {
+        if (isSigmaAlive(sigma)) sigma.getCamera().animatedZoom({ duration: 200 });
+      },
+      zoomOut: () => {
+        if (isSigmaAlive(sigma)) sigma.getCamera().animatedUnzoom({ duration: 200 });
+      },
       snapshot: () => {
+        if (!isSigmaAlive(sigma)) return null;
         // Sigma renders across stacked canvases; composite them in order.
         const canvases = sigma.getCanvases();
         const order = ['edges', 'nodes', 'edgeLabels', 'labels', 'hovers'];
@@ -341,6 +552,7 @@ function Controller({ controlRef, onLayoutRunning }) {
         return out.toDataURL('image/png');
       },
       relayout: () => {
+        if (!isSigmaAlive(sigma)) return;
         const graph = sigma.getGraph();
         if (graph.order === 0) return;
         onLayoutRunning?.(true);
@@ -351,11 +563,16 @@ function Controller({ controlRef, onLayoutRunning }) {
           iterations: Math.max(50, Math.min(300, Math.round(12000 / Math.max(1, graph.order)))),
           settings: { ...settings, adjustSizes: true, gravity: 0.6, scalingRatio: 12 },
         });
-        sigma.refresh();
-        sigma.getCamera().animate({ x: 0.5, y: 0.5, ratio: 1 }, { duration: 400 });
+        if (isSigmaAlive(sigma)) {
+          try {
+            sigma.refresh();
+            sigma.getCamera().animate({ x: 0.5, y: 0.5, ratio: 1 }, { duration: 400 });
+          } catch {}
+        }
         onLayoutRunning?.(false);
       },
       addFragment: (fragment, anchorId) => {
+        if (!isSigmaAlive(sigma)) return 0;
         const graph = sigma.getGraph();
         const anchor = graph.hasNode(anchorId) ? graph.getNodeAttributes(anchorId) : null;
         let added = 0;
@@ -367,6 +584,7 @@ function Controller({ controlRef, onLayoutRunning }) {
           const angle = (i / Math.max(1, fragment.nodes.length)) * Math.PI * 2;
           const radius = 60 + Math.random() * 40;
           graph.addNode(node.id, {
+            type: 'tile',
             x: (anchor?.x || 0) + Math.cos(angle) * radius,
             y: (anchor?.y || 0) + Math.sin(angle) * radius,
             size: tileSize(node.size),
@@ -387,22 +605,29 @@ function Controller({ controlRef, onLayoutRunning }) {
         (fragment.edges || []).forEach((edge) => {
           if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
           if (graph.hasEdge(edge.source, edge.target)) return;
+          const edgeCol = toAlphaColor(edgeColor(edge.edge_type), 0.38);
           graph.addEdge(edge.source, edge.target, {
-            color: edgeColor(edge.edge_type),
-            baseColor: edgeColor(edge.edge_type),
-            size: 0.9,
+            color: edgeCol,
+            baseColor: edgeCol,
+            size: 0.45,
             edge_type: edge.edge_type,
+            type: 'arrow',
           });
         });
 
-        sigma.refresh();
+        if (isSigmaAlive(sigma)) {
+          try {
+            sigma.refresh();
+          } catch {}
+        }
         return added;
       },
       getStats: () => {
+        if (!isSigmaAlive(sigma)) return { nodes: 0, edges: 0 };
         const graph = sigma.getGraph();
         return { nodes: graph.order, edges: graph.size };
       },
-      hasNode: (id) => sigma.getGraph().hasNode(id),
+      hasNode: (id) => isSigmaAlive(sigma) && sigma.getGraph().hasNode(id),
     };
   }, [sigma, focusOn, controlRef, onLayoutRunning]);
 
@@ -419,31 +644,80 @@ export default function GraphCanvas({
   pathEdges,
   searchMatches,
   onNodeClick,
+  onNodeDoubleClick,
   onNodeHover,
   onStageClick,
   onGraphLoaded,
   onLayoutRunning,
 }) {
   const emptyRef = useRef(new Set());
+  const [tooltip, setTooltip] = useState(null);
 
   return (
-    <SigmaContainer className="graph-canvas" settings={SIGMA_SETTINGS}>
-      <GraphLoader graphData={graphData} onGraphLoaded={onGraphLoaded} />
-      <ResizeHandler />
-      <Controller controlRef={controlRef} onLayoutRunning={onLayoutRunning} />
-      <Events
-        onNodeClick={onNodeClick}
-        onNodeHover={onNodeHover}
-        onStageClick={onStageClick}
-      />
-      <Reducers
-        hovered={hovered}
-        selected={selected}
-        filters={filters}
-        pathNodes={pathNodes || emptyRef.current}
-        pathEdges={pathEdges || emptyRef.current}
-        searchMatches={searchMatches || emptyRef.current}
-      />
-    </SigmaContainer>
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <SigmaContainer className="graph-canvas" settings={SIGMA_SETTINGS}>
+        <GraphLoader graphData={graphData} onGraphLoaded={onGraphLoaded} />
+        <ResizeHandler />
+        <Controller controlRef={controlRef} onLayoutRunning={onLayoutRunning} />
+        <NodeInteractions
+          onNodeClick={onNodeClick}
+          onNodeDoubleClick={onNodeDoubleClick}
+          onNodeHover={onNodeHover}
+          onStageClick={onStageClick}
+          onTooltipChange={setTooltip}
+        />
+        <Reducers
+          hovered={hovered}
+          selected={selected}
+          filters={filters}
+          pathNodes={pathNodes || emptyRef.current}
+          pathEdges={pathEdges || emptyRef.current}
+          searchMatches={searchMatches || emptyRef.current}
+        />
+      </SigmaContainer>
+
+      {tooltip && (
+        <div
+          className="graph-tooltip"
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 270, tooltip.x + 14),
+            top: Math.min(window.innerHeight - 170, tooltip.y + 14),
+          }}
+        >
+          <div className="graph-tooltip-header">
+            <span className={`graph-tooltip-type ${tooltip.attrs.node_type || ''}`}>
+              {tooltip.attrs.node_type || 'entity'}
+            </span>
+            {tooltip.attrs.risk_tier && (
+              <span
+                className="graph-tooltip-badge"
+                style={{ background: riskVar(tooltip.attrs.risk_tier) }}
+              >
+                {tooltip.attrs.risk_tier}
+              </span>
+            )}
+          </div>
+          <div className="graph-tooltip-id mono">{tooltip.id}</div>
+          <div className="graph-tooltip-details">
+            {tooltip.attrs.anomaly_score != null && (
+              <div className="graph-tooltip-row">
+                <span>Anomaly score</span>
+                <span className="mono">{Number(tooltip.attrs.anomaly_score).toFixed(1)}</span>
+              </div>
+            )}
+            {tooltip.attrs.degree != null && (
+              <div className="graph-tooltip-row">
+                <span>Connections</span>
+                <span className="mono">{tooltip.attrs.degree}</span>
+              </div>
+            )}
+          </div>
+          <div className="graph-tooltip-hint">
+            Click to select · Double-click to expand · Drag to move
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
