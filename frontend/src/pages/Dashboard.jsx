@@ -13,14 +13,34 @@ export default function Dashboard() {
   const [riskDist, setRiskDist] = useState([]);
   const [topAlerts, setTopAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState([]);
 
+  // allSettled, not all: each panel is an independent read, and `Promise.all`
+  // with a swallowing `.catch` meant one failed request silently left its
+  // panel at its initial empty value while the others rendered. A dashboard
+  // that shows zeros for a figure it could not fetch is worse than one that
+  // shows nothing — it reads as a finding.
   useEffect(() => {
-    Promise.all([
-      getDashboardStats().then(r => setStats(r.data)),
-      getTimeline('day').then(r => setTimeline(r.data)),
-      getRiskDistribution().then(r => setRiskDist(r.data)),
-      getTopAlerts(5).then(r => setTopAlerts(r.data)),
-    ]).catch(() => {}).finally(() => setLoading(false));
+    let cancelled = false;
+    const reads = [
+      ['statistics', getDashboardStats, setStats],
+      ['timeline', () => getTimeline('day'), setTimeline],
+      ['risk distribution', getRiskDistribution, setRiskDist],
+      ['top alerts', () => getTopAlerts(5), setTopAlerts],
+    ];
+    Promise.allSettled(reads.map(([, fetcher]) => fetcher()))
+      .then((results) => {
+        if (cancelled) return;
+        const problems = [];
+        results.forEach((result, i) => {
+          const [label, , setter] = reads[i];
+          if (result.status === 'fulfilled') setter(result.value.data);
+          else problems.push(label);
+        });
+        setFailed(problems);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   if (loading) return <div className="loading-spinner"><div className="spinner" /></div>;
@@ -63,6 +83,15 @@ export default function Dashboard() {
       <div className="page-header">
         <h1 className="page-title">Dashboard</h1>
       </div>
+
+      {failed.length > 0 && (
+        <div className="page-notice">
+          <b>Incomplete</b> — the backend did not return{' '}
+          {failed.join(', ')}. Those panels are blank because the request
+          failed, not because there is nothing to show. Check the server log
+          (Ingest → Show server log) for the reason.
+        </div>
+      )}
 
       {/* KPI strip */}
       <div className="stats-grid">

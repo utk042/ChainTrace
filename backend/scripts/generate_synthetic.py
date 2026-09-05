@@ -23,6 +23,10 @@ import ipaddress
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from app.logging_config import get_logger
+
+logger = get_logger("scripts.generate_synthetic")
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -355,7 +359,7 @@ def save_csv(records: list[dict], output_path: Path) -> None:
             row["output_amounts"] = json.dumps(row["output_amounts"])
             writer.writerow(row)
 
-    print(f"✓ Saved {len(records)} records to {output_path}")
+    logger.info(f"Saved {len(records)} records to {output_path}")
 
 
 def save_json(records: list[dict], output_path: Path) -> None:
@@ -365,7 +369,7 @@ def save_json(records: list[dict], output_path: Path) -> None:
     with open(output_path, "w") as f:
         json.dump(records, f, indent=2, default=str)
 
-    print(f"✓ Saved {len(records)} records to {output_path}")
+    logger.info(f"Saved {len(records)} records to {output_path}")
 
 
 def print_stats(records: list[dict]) -> None:
@@ -380,17 +384,14 @@ def print_stats(records: list[dict]) -> None:
         ips.add(r["src_ip"])
         ips.add(r["dst_ip"])
 
-    print("\n" + "=" * 50)
-    print("  ChainTrace Synthetic Dataset Statistics")
-    print("=" * 50)
-    print(f"  Total transactions:  {len(records)}")
-    print(f"  Unique wallets:      {len(wallets)}")
-    print(f"  Unique IPs:          {len(ips)}")
-    print(f"\n  Label distribution:")
+    logger.info("ChainTrace Synthetic Dataset Statistics")
+    logger.info(f"Total transactions:  {len(records)}")
+    logger.info(f"Unique wallets:      {len(wallets)}")
+    logger.info(f"Unique IPs:          {len(ips)}")
+    logger.info(f"Label distribution:")
     for label, count in sorted(labels.items(), key=lambda x: -x[1]):
         pct = count / len(records) * 100
-        print(f"    {label:20s}  {count:5d}  ({pct:.1f}%)")
-    print("=" * 50 + "\n")
+        logger.info(f"{label:20s}  {count:5d}  ({pct:.1f}%)")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

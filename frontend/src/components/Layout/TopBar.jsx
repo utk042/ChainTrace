@@ -23,12 +23,14 @@ const CONNECTION = {
   demo: { label: 'OFFLINE SNAPSHOT', color: 'var(--accent)' },
   ready: { label: 'CONNECTED · LIVE', color: 'var(--accent-green)' },
   empty: { label: 'CONNECTED · NO DATA', color: 'var(--accent-elevated)' },
+  degraded: { label: 'CONNECTED · DB ERROR', color: 'var(--accent-critical)' },
   offline: { label: 'OFFLINE · STORED DATA', color: 'var(--accent-elevated)' },
   down: { label: 'BACKEND OFFLINE', color: 'var(--accent-critical)' },
 };
 
 export default function TopBar() {
   const [stats, setStats] = useState(null);
+  const [statsError, setStatsError] = useState(null);
   const [query, setQuery] = useState('');
   const { status: liveStatus } = useBackendStatus();
   const navigate = useNavigate();
@@ -38,9 +40,22 @@ export default function TopBar() {
   const connection = CONNECTION[status] || CONNECTION.checking;
   const now = useClock();
 
+  // Refetched whenever the backend's state changes, not once on mount: the
+  // counters used to be read a single time and, if that read failed, every
+  // figure stayed as an em dash for the life of the page — beside pages that
+  // were listing thousands of rows from the same backend.
   useEffect(() => {
-    getDashboardStats().then((res) => setStats(res.data)).catch(() => {});
-  }, []);
+    if (status === 'checking') return undefined;
+    let cancelled = false;
+    getDashboardStats()
+      .then((res) => { if (!cancelled) { setStats(res.data); setStatsError(null); } })
+      .catch((e) => {
+        if (cancelled) return;
+        setStats(null);
+        setStatsError(e.response ? `stats: HTTP ${e.response.status}` : 'stats unavailable');
+      });
+    return () => { cancelled = true; };
+  }, [status]);
 
   // The graph explorer is the one view that resolves an arbitrary identifier
   // — address, txid or IP — so global search hands off to it.
@@ -80,6 +95,17 @@ export default function TopBar() {
             </span>
           </div>
         </div>
+        {/* An em dash for every counter reads as "nothing ingested". When the
+            figures are missing because the request failed, say so. */}
+        {statsError && (
+          <span
+            className="topbar-meta-label"
+            style={{ color: 'var(--accent-critical)' }}
+            title="The dashboard statistics request failed; the counters above are unknown, not zero."
+          >
+            {statsError}
+          </span>
+        )}
         <div className="topbar-status" style={{ color: connection.color }}>
           <span className="pulse-dot" style={{ background: connection.color }} />
           {connection.label}

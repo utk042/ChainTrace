@@ -2096,10 +2096,24 @@ a:hover {
   color: var(--accent-elevated);
 }
 
+.step-circle.active,
+.step-circle.running {
+  border-color: var(--accent-elevated);
+  background: var(--accent-elevated-bg);
+  color: var(--accent-elevated);
+}
+
 .step-circle.error {
   border-color: var(--accent-critical);
   background: var(--accent-critical-bg);
   color: var(--accent-critical);
+}
+
+/* Stages the run never reached because an earlier one failed. Dimmed rather
+   than left looking pending, so it is clear they were not attempted. */
+.step-circle.skipped {
+  opacity: 0.4;
+  border-style: dashed;
 }
 
 .step-name {
@@ -2581,3 +2595,154 @@ a:hover {
     min-width: 50%;
   }
 }
+
+
+/* ── Pipeline failures and the server log ──────────────────────────
+   A failed run used to render as one line of text with no traceback and no
+   way to see what the backend had actually done. These are the panels that
+   answer "why did it fail". */
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.pipeline-error {
+  margin-top: var(--space-lg);
+  padding: var(--space-md);
+  border: 1px solid var(--accent-critical);
+  border-radius: var(--radius-md);
+  background: var(--accent-critical-bg);
+}
+
+.pipeline-error-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--accent-critical);
+  font-size: var(--text-sm);
+}
+
+.pipeline-error-msg {
+  margin: var(--space-sm) 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+.pipeline-trace {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 320px;
+}
+
+.pipeline-log-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-top: var(--space-lg);
+}
+
+.pipeline-log-path {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  word-break: break-all;
+}
+
+.pipeline-log {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  max-height: 380px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.pipeline-log-empty {
+  color: var(--text-tertiary);
+  padding: var(--space-sm);
+}
+
+.pipeline-log-line {
+  display: grid;
+  grid-template-columns: 84px 62px 1fr;
+  gap: var(--space-sm);
+  align-items: baseline;
+}
+
+.pipeline-log-ts { color: var(--text-tertiary); }
+.pipeline-log-level { color: var(--text-tertiary); }
+.pipeline-log-msg { color: var(--text-secondary); word-break: break-word; white-space: pre-wrap; }
+
+@media (max-width: 720px) {
+  .pipeline-log-line { grid-template-columns: 1fr; gap: 0; }
+}
+
+/* ── Inspector: entities the backend has no record for ─────────────
+   Rendering the normal panel with every field blank made an unresolvable
+   node look like an unremarkable one. */
+
+.inspector-missing {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: flex-start;
+  margin: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--accent-elevated);
+  border-radius: var(--radius-md);
+  background: var(--accent-elevated-bg);
+  color: var(--accent-elevated);
+  font-size: var(--text-sm);
+}
+
+.inspector-missing p {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.inspector-missing code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  word-break: break-word;
+}
+
+.inspector-missing .btn {
+  margin-top: var(--space-sm);
+}
+
+/* The graph position is still real when the record is missing, so it stays
+   readable — just visibly secondary to the explanation above it. */
+.inspector-scroll.is-muted { opacity: 0.55; }
+
+
+/* A page rendering with some of its reads failed. Distinct from an empty
+   result: blank panels must never pass for a finding of "nothing there". */
+.page-notice {
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  border: 1px solid var(--accent-elevated);
+  border-radius: var(--radius-md);
+  background: var(--accent-elevated-bg);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.page-notice b { color: var(--accent-elevated); }

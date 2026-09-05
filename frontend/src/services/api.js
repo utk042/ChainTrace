@@ -118,6 +118,9 @@ export const uploadFile = (file) => {
 };
 export const runPipeline = (params = {}) => api.post('/api/ingest/run', null, { params });
 export const getPipelineStatus = () => api.get('/api/ingest/status');
+export const getPipelineLogs = (runId = null, limit = 300) =>
+  api.get('/api/ingest/logs', { params: { ...(runId ? { run_id: runId } : {}), limit } });
+export const getServerLogs = (limit = 200) => api.get('/api/logs', { params: { limit } });
 export const generateSampleData = (count = 5000) => api.post(`/api/ingest/generate-sample?count=${count}`);
 export const fetchRealData = (maxTransactions = 500, maxBlocks = 10) =>
   api.post(`/api/ingest/fetch-real?max_transactions=${maxTransactions}&max_blocks=${maxBlocks}`, null, { timeout: 300000 });

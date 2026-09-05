@@ -15,6 +15,10 @@ from app.graph.builder import (
 from app.graph.serializer import graph_to_json, NODE_COLORS, RISK_COLORS, _node_size, _truncate
 from app.ml.trainer import get_entity_graph, get_clusters
 
+from app.logging_config import get_logger
+
+logger = get_logger("app.routers.graph_explorer")
+
 router = APIRouter(prefix="/api/graph", tags=["Graph Explorer"])
 
 
@@ -24,6 +28,9 @@ def _tx_count() -> int:
         with get_db_readonly() as con:
             return con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
     except Exception:
+        # A read failure is not an empty table, and pretending otherwise is
+        # how the app came to tell operators to ingest data they already had.
+        logger.exception("Could not count transactions")
         return 0
 
 
@@ -35,13 +42,33 @@ def _resolve_graph() -> Optional[nx.Graph]:
     itself (a fresh worker, a restarted container) holds None even when the
     ingested data is on disk. Rebuilding costs one pass over the transactions
     table and keeps the response deterministic.
+
+    The transaction count is checked *first*, and an in-memory graph is
+    discarded when the table is empty. Module state outlives the rows it came
+    from: after a wipe or a failed re-ingest the process still held the last
+    run's graph, so `/api/graph/data` returned a full network — which the
+    canvas duly rendered, complete with node counts — over a database with
+    nothing in it. Every one of those nodes then resolved to nothing when
+    clicked, because the detail lookup queried the tables. A graph the
+    operator can see but not interrogate is worse than an empty canvas: it
+    reads as live evidence.
     """
+    tx_count = _tx_count()
+    if tx_count == 0:
+        G = get_entity_graph()
+        if G is not None and G.number_of_nodes() > 0:
+            logger.warning(
+                "Discarding an in-memory graph of %s nodes: the transactions "
+                "table is empty, so it no longer describes any stored data.",
+                G.number_of_nodes(),
+            )
+            from app.ml.trainer import reset_analysis_state
+            reset_analysis_state()
+        return None
+
     G = get_entity_graph()
     if G is not None and G.number_of_nodes() > 0:
         return G
-
-    if _tx_count() == 0:
-        return None
 
     from app.ml import trainer
     try:
@@ -52,8 +79,8 @@ def _resolve_graph() -> Optional[nx.Graph]:
             trainer._clusters = cluster_wallets(G)
         apply_scores_from_db(G)
         return G
-    except Exception as e:
-        print(f"⚠ On-demand graph rebuild failed: {e}")
+    except Exception:
+        logger.exception("On-demand graph rebuild failed")
         return None
 
 
@@ -242,8 +269,22 @@ def node_detail(entity_id: str):
     raised against it, and its strongest counterparties.
     """
     G = _resolve_graph()
-    if G is None or entity_id not in G:
-        return {"found": False, "id": entity_id}
+    if G is None:
+        return {
+            "found": False, "id": entity_id,
+            "reason": "no_graph",
+            "detail": ("There is no entity graph loaded — the database holds no "
+                       "transactions. Any graph still on screen was drawn from an "
+                       "earlier session; reload the page after ingesting data."),
+        }
+    if entity_id not in G:
+        return {
+            "found": False, "id": entity_id,
+            "reason": "not_in_graph",
+            "detail": ("This entity is not in the graph the backend currently "
+                       "holds. The graph on screen was loaded before the dataset "
+                       "changed; reload it to resynchronise."),
+        }
 
     data = dict(G.nodes[entity_id])
     node_type = data.get("node_type", "unknown")
@@ -350,8 +391,12 @@ def node_detail(entity_id: str):
                  "model": a[3], "description": a[4], "status": a[5]}
                 for a in alert_rows
             ]
-    except Exception as e:
-        print(f"⚠ node_detail enrichment failed for {entity_id}: {e}")
+    except Exception as exc:
+        # Reported, not swallowed: without this the panel showed an entity
+        # with no features and no alerts, which is exactly what a genuinely
+        # unremarkable wallet looks like.
+        logger.exception("node_detail enrichment failed for %s", entity_id)
+        detail["enrichment_error"] = f"{type(exc).__name__}: {exc}"
 
     return detail
 

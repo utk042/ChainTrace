@@ -3,14 +3,15 @@ ChainTrace Forensics — Ingest Router
 File upload and pipeline execution endpoints.
 """
 
+import threading
+import traceback
 import uuid
-import os
-import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query
 from app.config import settings
 from app.database import get_db
+from app.logging_config import get_logger, log_tail, log_file_path
 from app.ingestion.parser import parse_file
 from app.ingestion.validator import validate_records
 from app.ingestion.enricher import get_enricher
@@ -18,15 +19,107 @@ from app.ingestion.loader import load_transactions, clear_all_data
 from app.ingestion.real_fetcher import fetch_recent_real_transactions, EsploraError
 from app.ml.trainer import run_full_pipeline
 
+logger = get_logger("app.routers.ingest")
+
 router = APIRouter(prefix="/api/ingest", tags=["Ingest"])
 
-# Pipeline state
+# The pipeline's stages, in order, with the progress each one starts at.
+# The frontend renders exactly these, so a failure is attributed to the stage
+# that actually failed. Previously the status carried a bare progress number
+# that was reset to 0 on error, which made every failure — including one in
+# the ML stage twenty minutes in — light up "PARSE & VALIDATE" as the culprit.
+STAGES = [
+    ("clear", "Clear existing data", 5),
+    ("parse", "Parse data file", 10),
+    ("validate", "Validate records", 20),
+    ("enrich", "Enrich with GeoIP", 30),
+    ("load", "Load into DuckDB", 40),
+    ("analyse", "Run ML analysis", 50),
+]
+STAGE_ORDER = [key for key, _, _ in STAGES]
+
+# Pipeline state. Guarded because it is written from the background worker
+# thread and read by every /status poll.
+_status_lock = threading.Lock()
 _pipeline_status = {
     "status": "idle",
     "progress": 0,
     "message": "",
     "run_id": None,
+    "stage": None,
+    "stages": [],
+    "error": None,
+    "error_type": None,
+    "traceback": None,
+    "started_at": None,
+    "finished_at": None,
 }
+
+
+def _initial_stages() -> list[dict]:
+    return [
+        {"key": key, "label": label, "status": "pending", "detail": None}
+        for key, label, _ in STAGES
+    ]
+
+
+def _set_status(**fields) -> None:
+    with _status_lock:
+        _pipeline_status.update(fields)
+
+
+def _get_status() -> dict:
+    with _status_lock:
+        return dict(_pipeline_status)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+class _Run:
+    """
+    One pipeline execution: stage bookkeeping plus run-tagged logging.
+
+    Every message is logged with the run id, so `/api/ingest/logs` can serve
+    the log for one run rather than the whole process, and so a run that
+    failed hours ago can still be read back.
+    """
+
+    def __init__(self, run_id: str):
+        self.run_id = run_id
+        self.stages = _initial_stages()
+        self._index = {s["key"]: s for s in self.stages}
+
+    def _progress_for(self, key: str) -> int:
+        return dict((k, p) for k, _, p in STAGES)[key]
+
+    def begin(self, key: str, message: str) -> None:
+        self._index[key]["status"] = "running"
+        logger.info(message, extra={"run_id": self.run_id, "stage": key})
+        _set_status(
+            status="running", stage=key, message=message,
+            progress=self._progress_for(key), stages=list(self.stages),
+        )
+
+    def finish(self, key: str, detail: str | None = None) -> None:
+        self._index[key]["status"] = "done"
+        self._index[key]["detail"] = detail
+        if detail:
+            logger.info(detail, extra={"run_id": self.run_id, "stage": key})
+        _set_status(stages=list(self.stages))
+
+    def fail(self, key: str | None, exc: Exception) -> None:
+        if key and key in self._index:
+            self._index[key]["status"] = "error"
+            self._index[key]["detail"] = f"{type(exc).__name__}: {exc}"
+        for stage in self.stages:
+            if stage["status"] == "pending":
+                stage["status"] = "skipped"
+        logger.exception(
+            "Pipeline failed during '%s'", key or "startup",
+            extra={"run_id": self.run_id, "stage": key},
+        )
 
 # Only the formats app/ingestion/parser.py can actually read.
 ALLOWED_UPLOAD_SUFFIXES = {".csv", ".json", ".xml"}
@@ -127,18 +220,17 @@ async def run_pipeline(
     clear_existing: bool = True,
 ):
     """Trigger the full analysis pipeline."""
-    global _pipeline_status
-
-    if _pipeline_status["status"] == "running":
-        return {"error": "Pipeline already running", "status": _pipeline_status}
+    current = _get_status()
+    if current["status"] == "running":
+        return {"error": "Pipeline already running", "status": current}
 
     run_id = f"RUN-{uuid.uuid4().hex[:8].upper()}"
-    _pipeline_status = {
-        "status": "running",
-        "progress": 0,
-        "message": "Starting pipeline...",
-        "run_id": run_id,
-    }
+    _set_status(
+        status="running", progress=0, message="Starting pipeline...",
+        run_id=run_id, stage=None, stages=_initial_stages(),
+        error=None, error_type=None, traceback=None,
+        started_at=_now(), finished_at=None,
+    )
 
     # Determine file to process
     if not file_path:
@@ -154,15 +246,20 @@ async def run_pipeline(
                     break
 
     if not file_path:
-        _pipeline_status = {"status": "error", "progress": 0,
-                            "message": "No data file found. Upload a file first.", "run_id": run_id}
-        return {"error": "No data file found"}
+        message = ("No data file found. Upload a file, generate a sample, or "
+                   "fetch live blockchain data first.")
+        logger.error(message, extra={"run_id": run_id})
+        _set_status(status="error", progress=0, message=message, run_id=run_id,
+                    error=message, error_type="NoDataFile", finished_at=_now())
+        return {"error": message, "run_id": run_id}
 
     try:
         resolved = _resolve_data_file(file_path)
-    except HTTPException:
-        _pipeline_status = {"status": "error", "progress": 0,
-                            "message": f"Cannot read {file_path}.", "run_id": run_id}
+    except HTTPException as exc:
+        message = f"Cannot read {file_path}: {exc.detail}"
+        logger.error(message, extra={"run_id": run_id})
+        _set_status(status="error", progress=0, message=message, run_id=run_id,
+                    error=message, error_type="UnreadableFile", finished_at=_now())
         raise
 
     file_path = str(resolved)
@@ -177,8 +274,29 @@ async def run_pipeline(
 
 @router.get("/status")
 def get_pipeline_status():
-    """Get current pipeline execution status."""
-    return _pipeline_status
+    """
+    Current pipeline execution status, including the per-stage breakdown and,
+    on failure, the exception type and its traceback.
+    """
+    return _get_status()
+
+
+@router.get("/logs")
+def get_pipeline_logs(run_id: str | None = None, limit: int = Query(300, ge=1, le=1000)):
+    """
+    The log for a pipeline run — the thing that was missing when a run died
+    with nothing but "Pipeline error: [Errno 32] Broken pipe" on screen.
+
+    With no `run_id`, returns the tail of the whole server log; with one,
+    only the records that run emitted.
+    """
+    status = _get_status()
+    return {
+        "run_id": run_id or status.get("run_id"),
+        "status": status.get("status"),
+        "records": log_tail(limit=limit, run_id=run_id),
+        "log_file": log_file_path(),
+    }
 
 
 @router.post("/generate-sample")
@@ -266,11 +384,19 @@ async def fetch_real_data(
 
 
 def _execute_pipeline(file_path: str, run_id: str, clear_existing: bool):
-    """Execute the full pipeline in a background task."""
-    global _pipeline_status
+    """
+    Execute the full pipeline in a background task.
+
+    Every stage is announced before it runs and confirmed after, so the status
+    the UI polls names the stage in flight rather than a bare percentage, and
+    a failure is attributed to the stage that actually failed.
+    """
+    run = _Run(run_id)
+    stage = None
+    logger.info("Pipeline %s starting on %s (clear_existing=%s)",
+                run_id, file_path, clear_existing, extra={"run_id": run_id})
 
     try:
-        # Record pipeline run
         with get_db() as con:
             con.execute("""
                 INSERT INTO pipeline_runs (run_id, started_at, status)
@@ -278,38 +404,62 @@ def _execute_pipeline(file_path: str, run_id: str, clear_existing: bool):
             """, [run_id])
 
         # Step 1: Clear existing data if requested
+        stage = "clear"
         if clear_existing:
-            _pipeline_status["message"] = "Clearing existing data..."
-            _pipeline_status["progress"] = 5
+            run.begin(stage, "Clearing existing data...")
             with get_db() as con:
                 clear_all_data(con)
+            run.finish(stage, "Previous dataset and analysis state cleared")
+        else:
+            run.begin(stage, "Keeping existing data")
+            run.finish(stage, "Existing rows retained; new records merged in")
 
         # Step 2: Parse file
-        _pipeline_status["message"] = "Parsing data file..."
-        _pipeline_status["progress"] = 10
+        stage = "parse"
+        run.begin(stage, f"Parsing {Path(file_path).name}...")
         raw_records = list(parse_file(file_path))
+        if not raw_records:
+            raise ValueError(
+                f"{Path(file_path).name} contained no readable records. Check that "
+                f"it is a CSV, JSON or XML export in ChainTrace's transaction format."
+            )
+        run.finish(stage, f"{len(raw_records)} records read")
 
         # Step 3: Validate
-        _pipeline_status["message"] = f"Validating {len(raw_records)} records..."
-        _pipeline_status["progress"] = 20
+        stage = "validate"
+        run.begin(stage, f"Validating {len(raw_records)} records...")
         valid_records, errors = validate_records(iter(raw_records))
+        if not valid_records:
+            sample = "; ".join(str(e) for e in errors[:3])
+            raise ValueError(
+                f"All {len(raw_records)} records failed validation."
+                + (f" First errors: {sample}" if sample else "")
+            )
+        if errors:
+            logger.warning("%s record(s) rejected during validation; first: %s",
+                           len(errors), errors[0], extra={"run_id": run_id, "stage": stage})
+        run.finish(stage, f"{len(valid_records)} valid, {len(errors)} rejected")
 
         # Step 4: Enrich with GeoIP
-        _pipeline_status["message"] = "Enriching with GeoIP data..."
-        _pipeline_status["progress"] = 30
+        stage = "enrich"
+        run.begin(stage, "Enriching with GeoIP data...")
         enricher = get_enricher()
         valid_records = enricher.enrich_batch(valid_records)
+        run.finish(stage, f"{len(valid_records)} records enriched")
 
         # Step 5: Load into DuckDB
-        _pipeline_status["message"] = "Loading into database..."
-        _pipeline_status["progress"] = 40
+        stage = "load"
+        run.begin(stage, "Loading into database...")
         with get_db() as con:
             inserted = load_transactions(valid_records, con)
+        run.finish(stage, f"{inserted} transactions written")
 
         # Step 6: Run ML pipeline
-        _pipeline_status["message"] = "Running ML analysis..."
-        _pipeline_status["progress"] = 50
+        stage = "analyse"
+        run.begin(stage, "Running ML analysis (graph, clustering, scoring, alerts)...")
         summary = run_full_pipeline()
+        alerts_generated = summary["steps"].get("alerts", {}).get("generated", 0)
+        run.finish(stage, f"{alerts_generated} alerts generated")
 
         # Update pipeline run record
         with get_db() as con:
@@ -320,27 +470,44 @@ def _execute_pipeline(file_path: str, run_id: str, clear_existing: bool):
                 WHERE run_id = ?
             """, [len(raw_records), len(valid_records), len(errors), run_id])
 
-        _pipeline_status = {
-            "status": "completed",
-            "progress": 100,
-            "message": f"Pipeline complete. {inserted} records processed, {summary['steps'].get('alerts', {}).get('generated', 0)} alerts generated.",
-            "run_id": run_id,
-            "summary": summary,
-        }
+        message = f"Pipeline complete. {inserted} records processed, {alerts_generated} alerts generated."
+        logger.info(message, extra={"run_id": run_id})
+        _set_status(
+            status="completed", progress=100, message=message, run_id=run_id,
+            stage=None, stages=run.stages, summary=summary,
+            error=None, error_type=None, traceback=None, finished_at=_now(),
+        )
 
     except Exception as e:
-        _pipeline_status = {
-            "status": "error",
-            "progress": 0,
-            "message": f"Pipeline error: {str(e)}",
-            "run_id": run_id,
-        }
-        # Update DB
+        run.fail(stage, e)
+        detail = traceback.format_exc()
+        _set_status(
+            status="error",
+            # Held at the failing stage's progress rather than reset to 0, so
+            # the tracker shows how far the run actually got.
+            progress=run._progress_for(stage) if stage else 0,
+            message=f"{type(e).__name__} during '{stage or 'startup'}': {e}",
+            run_id=run_id, stage=stage, stages=run.stages,
+            error=str(e), error_type=type(e).__name__, traceback=detail,
+            finished_at=_now(),
+        )
+        # The database has been cleared but not repopulated, so anything the
+        # process still holds in memory describes a dataset that is no longer
+        # there. Dropping it is what stops the app rendering a graph and
+        # dashboard for data the tables no longer contain.
+        if clear_existing:
+            try:
+                from app.ml.trainer import reset_analysis_state
+                reset_analysis_state()
+            except Exception:
+                logger.exception("Could not reset analysis state after a failed run",
+                                 extra={"run_id": run_id})
         try:
             with get_db() as con:
                 con.execute("""
                     UPDATE pipeline_runs SET finished_at = CURRENT_TIMESTAMP,
                     status = 'error', log = ? WHERE run_id = ?
-                """, [str(e), run_id])
+                """, [detail[-4000:], run_id])
         except Exception:
-            pass
+            logger.exception("Could not record the failed run in pipeline_runs",
+                             extra={"run_id": run_id})

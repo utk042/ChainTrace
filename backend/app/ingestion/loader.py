@@ -107,7 +107,15 @@ def _update_ip_metadata(records: list[TransactionRecord], con: duckdb.DuckDBPyCo
 
 
 def clear_all_data(con: duckdb.DuckDBPyConnection = None) -> None:
-    """Clear all data from all tables (for re-ingestion)."""
+    """
+    Clear all data from all tables (for re-ingestion).
+
+    Also drops the in-memory analysis state derived from those rows. Emptying
+    the tables alone left the entity graph, clusters and fitted models loaded
+    in the process, so the graph endpoints kept serving the previous run's
+    network over an empty database — a graph the operator could see and pan
+    but whose nodes resolved to nothing.
+    """
     own_connection = con is None
     if own_connection:
         ctx = get_db()
@@ -122,3 +130,8 @@ def clear_all_data(con: duckdb.DuckDBPyConnection = None) -> None:
     finally:
         if own_connection:
             ctx.__exit__(None, None, None)
+
+    # Imported here rather than at module scope: app.ml.trainer pulls in the
+    # whole ML stack, which the loader has no other reason to require.
+    from app.ml.trainer import reset_analysis_state
+    reset_analysis_state()
