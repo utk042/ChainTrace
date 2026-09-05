@@ -550,7 +550,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   overflow-x: hidden;
   scrollbar-width: none;
   z-index: var(--z-dropdown);
-  transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease;
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1) 0s, box-shadow 0.2s ease 0s;
   white-space: nowrap;
 }
 
@@ -560,6 +560,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   width: 175px;
   box-shadow: 6px 0 24px rgba(0, 0, 0, 0.65), 1px 0 0 var(--border);
   background: var(--bg-chrome);
+  transition-delay: 0.12s;
 }
 
 .rail-spacer { flex: 1; }
@@ -1728,11 +1729,25 @@ kbd {
 .page-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: var(--space-md);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-md) var(--space-md) var(--space-xl);
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+}
+
+/* Panels placed inside a scrolling document page must not collapse or clip content. */
+.page-scroll .panel {
+  flex: 0 0 auto;
+  min-height: fit-content;
+  overflow: visible;
+}
+
+.page-scroll .panel-body {
+  flex: 0 0 auto;
+  min-height: fit-content;
+  overflow: visible;
 }
 
 .page-toolbar {
@@ -2656,7 +2671,7 @@ button.stat-tile:hover { background: var(--bg-well); }
   align-items: center;
   justify-content: center;
   gap: var(--space-sm);
-  padding: var(--space-2xl) var(--space-lg);
+  padding: var(--space-xl) var(--space-lg);
   background: var(--bg-panel);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-md);
@@ -2681,29 +2696,38 @@ button.stat-tile:hover { background: var(--bg-well); }
 
 .step-tracker {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: var(--space-md);
   padding: var(--space-md);
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  min-height: fit-content;
+}
+
+.panel .step-tracker {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: var(--space-md);
 }
 
 .step-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   text-align: center;
   min-width: 0;
+  padding: 0 var(--space-xs);
 }
 
 .step-circle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--bg-control);
   color: var(--text-muted);
@@ -2720,10 +2744,17 @@ button.stat-tile:hover { background: var(--bg-well); }
   font-weight: 600;
   letter-spacing: var(--tracking-label);
   color: var(--text-secondary);
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
-.step-detail { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.4; overflow-wrap: anywhere; }
+.step-detail {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+}
 
 .progress-track {
   height: 4px;
