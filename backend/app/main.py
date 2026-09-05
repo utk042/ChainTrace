@@ -2,6 +2,9 @@
 ChainTrace Forensics — FastAPI Application Entry Point
 """
 
+import os
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -9,17 +12,33 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.database import init_database, close_database, get_db
-from app.logging_config import configure_logging, get_logger, log_file_path
+from app.logging_config import (
+    configure_logging, get_logger, log_file_path, std_streams_broken,
+)
 from app.routers import dashboard, alerts, graph_explorer, wallets, transactions, ingest, settings as settings_router
 
 configure_logging()
 logger = get_logger("app.main")
 
+# Bumped whenever the shape of a response the frontend depends on changes.
+#
+# A running backend keeps its code in memory: a dev server started before a
+# `git pull`, or one orphaned when its terminal closed, keeps answering with
+# the old code while the browser hot-reloads the new frontend against it. The
+# result is a UI rendering a half-populated response and an operator debugging
+# a bug that was already fixed on disk. The frontend compares this against the
+# revision it was built for and says so outright.
+API_REVISION = 2
+
+PROCESS_ID = os.getpid()
+STARTED_AT = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle: initialize DB on startup."""
-    logger.info("ChainTrace Forensics — starting")
+    logger.info("ChainTrace Forensics — starting (pid %s, api revision %s)",
+                PROCESS_ID, API_REVISION)
     logger.info("Logging to %s", log_file_path())
     init_database()
     logger.info("Database initialized at %s", settings.DUCKDB_PATH)
@@ -180,6 +199,16 @@ def health():
         "status": "healthy" if db_error is None else "degraded",
         "service": "ChainTrace Forensics",
         "version": "1.0.0",
+        # Identity of the process answering, so a stale server can be spotted
+        # and killed rather than debugged.
+        "api_revision": API_REVISION,
+        "pid": PROCESS_ID,
+        "started_at": STARTED_AT,
+        # True once a console write has been dropped because nothing is
+        # reading stdout — the backend was launched from a terminal or wrapper
+        # that has since gone. Harmless now, but it means the server's console
+        # output is going nowhere and `data/logs/` is the only copy.
+        "console_detached": std_streams_broken(),
         "has_data": db_error is None and counts["transactions"] > 0,
         "db_error": db_error,
         "transaction_count": counts["transactions"],

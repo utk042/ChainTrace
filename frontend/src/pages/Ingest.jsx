@@ -322,11 +322,22 @@ export default function Ingest() {
               <div className="pipeline-error-head">
                 <Icon name="alertTriangle" size={14} />
                 <span>
-                  Failed during <b>{pipelineStatus.stage || 'startup'}</b>
+                  {pipelineStatus.stage
+                    ? <>Failed during <b>{pipelineStatus.stage}</b></>
+                    : 'Failed before any stage started'}
                   {pipelineStatus.error_type ? ` — ${pipelineStatus.error_type}` : ''}
                 </span>
               </div>
               {pipelineStatus.error && <p className="pipeline-error-msg">{pipelineStatus.error}</p>}
+              {/* A backend older than this page reports neither a stage nor an
+                  error field, so the panel would otherwise be an empty red bar
+                  under a message in a format this build no longer produces. */}
+              {!pipelineStatus.error && !pipelineStatus.stages?.length && (
+                <p className="pipeline-error-msg">
+                  The backend reported no stage breakdown for this run, which means it is
+                  running older code than this page. Restart the backend and run again.
+                </p>
+              )}
               {pipelineStatus.traceback && (
                 <>
                   <button className="btn btn-outline btn-sm" onClick={() => setShowTrace((v) => !v)}>

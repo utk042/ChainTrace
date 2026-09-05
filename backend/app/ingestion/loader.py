@@ -115,6 +115,14 @@ def clear_all_data(con: duckdb.DuckDBPyConnection = None) -> None:
     in the process, so the graph endpoints kept serving the previous run's
     network over an empty database — a graph the operator could see and pan
     but whose nodes resolved to nothing.
+
+    `pipeline_runs` is deliberately *not* cleared. It is the audit trail of
+    what was done to this database, not data derived from it, and a re-ingest
+    is one of the events it exists to record. Wiping it meant the record of
+    the run in progress — inserted moments earlier by _execute_pipeline —
+    was deleted before that run finished, so the table was permanently empty:
+    the dashboard's "last ingest" never had a value, and the traceback a
+    failed run writes to its `log` column updated nothing.
     """
     own_connection = con is None
     if own_connection:
@@ -126,7 +134,6 @@ def clear_all_data(con: duckdb.DuckDBPyConnection = None) -> None:
         con.execute("DELETE FROM wallet_features")
         con.execute("DELETE FROM alerts")
         con.execute("DELETE FROM ip_metadata")
-        con.execute("DELETE FROM pipeline_runs")
     finally:
         if own_connection:
             ctx.__exit__(None, None, None)

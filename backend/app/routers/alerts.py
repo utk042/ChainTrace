@@ -4,7 +4,7 @@ CRUD and filtering for anomaly alerts.
 """
 
 import json
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from app.database import get_db_readonly, get_db
 from typing import Optional
@@ -141,7 +141,7 @@ def get_alert_detail(alert_id: str):
         """, [alert_id]).fetchone()
 
         if not row:
-            return {"error": "Alert not found"}
+            raise HTTPException(status_code=404, detail=f"No alert with id '{alert_id}'.")
 
         shap_vals = row[7]
         if isinstance(shap_vals, str):
@@ -169,9 +169,20 @@ def update_alert_status(alert_id: str, new_status: str):
     """Update alert status (pending/investigating/resolved/dismissed)."""
     valid_statuses = ["pending", "investigating", "resolved", "dismissed"]
     if new_status not in valid_statuses:
-        return {"error": f"Invalid status. Must be one of: {valid_statuses}"}
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status '{new_status}'. Must be one of: {', '.join(valid_statuses)}.",
+        )
 
     with get_db() as con:
+        exists = con.execute(
+            "SELECT 1 FROM alerts WHERE alert_id = ?", [alert_id],
+        ).fetchone()
+        # An UPDATE that matches nothing is not an error to DuckDB, so
+        # without this the endpoint reported success for an alert that does
+        # not exist and the caller had no way to tell.
+        if not exists:
+            raise HTTPException(status_code=404, detail=f"No alert with id '{alert_id}'.")
         con.execute(
             "UPDATE alerts SET status = ? WHERE alert_id = ?",
             [new_status, alert_id],

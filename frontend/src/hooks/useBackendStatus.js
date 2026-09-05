@@ -1,12 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getHealth, getApiBaseUrl } from '../services/api';
+
+import { REQUIRED_API_REVISION } from '../services/apiContract';
+
+export { REQUIRED_API_REVISION };
 import { useOnline } from './useOnline';
 
 /**
- * Polls /api/health so the app can tell six states apart:
+ * Polls /api/health so the app can tell seven states apart:
  *
  *   'down'     — the backend can't be reached and nothing is stored
  *   'offline'  — no network, but the service worker has data from earlier
+ *   'stale'    — reachable, but running older code than this frontend
  *   'degraded' — reachable, but it cannot read its own database
  *   'empty'    — reachable, and the database really is empty
  *   'ready'    — reachable with data
@@ -49,6 +54,21 @@ export function useBackendStatus(pollMs = 30000) {
         setState({ status: 'offline', health, cachedAt: res.cachedAt, error: null });
         return;
       }
+      // A backend older than this UI answers with the old response shapes,
+      // and the pages render a confusing half-populated result: a pipeline
+      // failure with no stage breakdown, an error panel with no message. That
+      // reads as a new bug rather than as a server that needs restarting, so
+      // it is called out before anything else is judged.
+      const revision = Number(health.api_revision ?? 0);
+      if (revision < REQUIRED_API_REVISION) {
+        setState({
+          status: 'stale', health, cachedAt: null, revision,
+          error: `This interface expects backend revision ${REQUIRED_API_REVISION}, `
+            + `but the backend is answering with revision ${revision || 'unknown (pre-versioning)'}.`,
+        });
+        return;
+      }
+
       if (health.db_error) {
         setState({
           status: 'degraded', health, cachedAt: null,
