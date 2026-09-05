@@ -72,6 +72,7 @@ export default function NodeInspector({
   onExpand,
   onSelectNode,
   onPathFrom,
+  onReload,
   expanding,
 }) {
   const [copied, setCopied] = useState(false);
@@ -81,6 +82,11 @@ export default function NodeInspector({
   const type = detail.node_type || 'unknown';
   const features = detail.features || {};
   const score = detail.anomaly_score || 0;
+  // The backend explicitly reported no record for this entity. Rendering the
+  // normal panel with everything blank made an unresolvable node look like an
+  // uneventful one: a "Wallet · UNKNOWN" header, an empty connections list and
+  // no explanation. It has a reason; show it.
+  const missing = detail.found === false && !loading;
 
   const copy = () => {
     navigator.clipboard?.writeText(id).then(() => {
@@ -144,7 +150,41 @@ export default function NodeInspector({
 
       {loading && <div className="inspector-loading">Loading entity record…</div>}
 
-      <div className="inspector-scroll">
+      {missing && (
+        <div className="inspector-missing">
+          <Icon name="alertTriangle" size={14} />
+          <div>
+            <b>No record for this entity</b>
+            <p>
+              {detail.detail
+                || 'The backend has no stored record for this identifier.'}
+            </p>
+            {detail.reason === 'not_in_graph' && (
+              <button className="btn btn-outline" onClick={onReload}>
+                <Icon name="refresh" size={12} /> Reload graph
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {detail.enrichment_error && (
+        <div className="inspector-missing">
+          <Icon name="alertTriangle" size={14} />
+          <div>
+            <b>Details could not be loaded</b>
+            {/* Without this the panel showed the node's graph position and
+                nothing else, which is indistinguishable from a wallet that
+                genuinely has no features or alerts. */}
+            <p>
+              The entity is in the graph, but reading its features and alerts
+              from the database failed: <code>{detail.enrichment_error}</code>
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className={`inspector-scroll${missing ? ' is-muted' : ''}`}>
         <Section title="Connections" count={detail.degree}>
           <Row label="Total links" value={fmtNum(detail.degree)} />
           {Object.entries(detail.neighbor_types || {}).map(([t, n]) => (

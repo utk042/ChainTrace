@@ -28,6 +28,10 @@ from app.ml.embeddings import GraphEmbedder
 from app.ml.explainer import AnomalyExplainer
 from app.models.alert import RiskTier
 
+from app.logging_config import get_logger
+
+logger = get_logger("app.ml.trainer")
+
 
 # Module-level state (shared across requests)
 _entity_graph = None
@@ -36,6 +40,29 @@ _graph_embedder = None
 _explainer = None
 _clusters = None
 _wallet_features = None
+
+
+def reset_analysis_state() -> None:
+    """
+    Drop every in-memory analysis artefact.
+
+    The entity graph, the clusters and the trained models are module state
+    that outlives the rows they were derived from. Wiping the tables without
+    wiping this left the graph endpoints happily serving the previous run:
+    the canvas rendered a full network while the database behind it was
+    empty, and clicking any node returned `found: false` because the backend
+    looked the entity up in a graph it had also just rebuilt from nothing.
+    Anything that clears or replaces the ingested data calls this first.
+    """
+    global _entity_graph, _anomaly_detector, _graph_embedder, _explainer
+    global _clusters, _wallet_features
+    _entity_graph = None
+    _anomaly_detector = None
+    _graph_embedder = None
+    _explainer = None
+    _clusters = None
+    _wallet_features = None
+    logger.info("In-memory analysis state cleared")
 
 
 def get_entity_graph():
@@ -110,25 +137,23 @@ def run_full_pipeline() -> dict:
     }
     eff = get_effective_settings()
 
-    print("\n" + "=" * 60)
-    print("  ChainTrace Forensics — Full Analysis Pipeline")
-    print("=" * 60)
+    logger.info("ChainTrace Forensics — Full Analysis Pipeline")
 
     # ── Step 1: Build Entity Graph ────────────────────────────────
-    print("\n[1/8] Building entity graph...")
+    logger.info("[1/8] Building entity graph...")
     _entity_graph = build_entity_graph()
     graph_stats = get_graph_stats(_entity_graph)
     summary["steps"]["graph"] = graph_stats
-    print(f"  ✓ Graph: {graph_stats['total_nodes']} nodes, {graph_stats['total_edges']} edges")
+    logger.info(f"Graph: {graph_stats['total_nodes']} nodes, {graph_stats['total_edges']} edges")
 
     # ── Step 2: Cluster Wallets ───────────────────────────────────
-    print("\n[2/8] Clustering wallets (Louvain + common-input heuristic)...")
+    logger.info("[2/8] Clustering wallets (Louvain + common-input heuristic)...")
     _clusters = cluster_wallets(_entity_graph)
     summary["steps"]["clustering"] = {"clusters": len(_clusters)}
-    print(f"  ✓ {len(_clusters)} wallet clusters detected")
+    logger.info(f"{len(_clusters)} wallet clusters detected")
 
     # ── Step 3: Pattern Detection & Risk Propagation ──────────────
-    print("\n[3/8] Detecting laundering patterns & propagating seed risk...")
+    logger.info("[3/8] Detecting laundering patterns & propagating seed risk...")
     with get_db_readonly() as con:
         peel_data = detect_peeling_chains(con)
         coinjoin_txs = detect_coinjoin_transactions(
@@ -150,17 +175,17 @@ def run_full_pipeline() -> dict:
         "seed_wallets": len(seed_wallets),
         "wallets_in_seed_proximity": len(proximity_data),
     }
-    print(f"  ✓ {chain_count} peeling chains, {len(coinjoin_txs)} CoinJoin-like txs, "
+    logger.info(f"{chain_count} peeling chains, {len(coinjoin_txs)} CoinJoin-like txs, "
           f"{len(proximity_data)} wallets within {int(eff['darknet_proximity_hops'])} hops of "
           f"{len(seed_wallets)} seed wallet(s)")
 
     # ── Step 4: Compute Features ──────────────────────────────────
-    print("\n[4/8] Computing behavioral + structural features...")
+    logger.info("[4/8] Computing behavioral + structural features...")
     _wallet_features = compute_wallet_features()
     merge_pattern_features(_wallet_features, peel_data, mixer_counts, proximity_data)
     addresses, feature_matrix = features_to_matrix(_wallet_features)
     summary["steps"]["features"] = {"wallets": len(addresses), "dimensions": feature_matrix.shape[1]}
-    print(f"  ✓ {len(addresses)} wallets × {feature_matrix.shape[1]} features ({', '.join(FEATURE_NAMES)})")
+    logger.info(f"{len(addresses)} wallets × {feature_matrix.shape[1]} features ({', '.join(FEATURE_NAMES)})")
 
     # Save features to DB
     save_features_to_db(_wallet_features)
@@ -182,10 +207,10 @@ def run_full_pipeline() -> dict:
     if hub_data:
         save_features_to_db(_wallet_features)
     summary["steps"]["patterns"]["consolidation_hubs_detected"] = len(hub_data)
-    print(f"  ✓ {len(hub_data)} consolidation-hub (fan-in/fan-out mixing) wallet(s) detected")
+    logger.info(f"{len(hub_data)} consolidation-hub (fan-in/fan-out mixing) wallet(s) detected")
 
     # ── Step 5: Train Autoencoder ─────────────────────────────────
-    print("\n[5/8] Training autoencoder...")
+    logger.info("[5/8] Training autoencoder...")
     _anomaly_detector = AnomalyDetector()
 
     if not _anomaly_detector.load():
@@ -200,7 +225,7 @@ def run_full_pipeline() -> dict:
         summary["steps"]["autoencoder"] = {"loaded_from_disk": True}
 
     # ── Step 6: Node2Vec Embeddings + Cluster Refinement ──────────
-    print("\n[6/8] Training Node2Vec embeddings...")
+    logger.info("[6/8] Training Node2Vec embeddings...")
     _graph_embedder = GraphEmbedder()
 
     # Unlike the autoencoder, embedding_dim never changes, so a cached file
@@ -215,7 +240,7 @@ def run_full_pipeline() -> dict:
     if cache_loaded and graph_node_count > 0:
         coverage = sum(1 for n in _entity_graph.nodes if n in _graph_embedder.embeddings) / graph_node_count
         if coverage < 0.9:
-            print(f"  ⚠ Cached embeddings cover only {coverage:.0%} of the current graph. Discarding, will retrain.")
+            logger.warning(f"Cached embeddings cover only {coverage:.0%} of the current graph. Discarding, will retrain.")
             cache_loaded = False
 
     if not cache_loaded:
@@ -228,11 +253,11 @@ def run_full_pipeline() -> dict:
     before = len(_clusters)
     _clusters = refine_clusters_with_embeddings(_entity_graph, _clusters, _graph_embedder)
     summary["steps"]["embeddings"]["clusters_merged_by_similarity"] = before - len(_clusters)
-    print(f"  ✓ {len(_graph_embedder.embeddings)} embeddings; "
+    logger.info(f"{len(_graph_embedder.embeddings)} embeddings; "
           f"{before - len(_clusters)} singleton cluster(s) merged by embedding similarity")
 
     # ── Step 7: Score Anomalies ───────────────────────────────────
-    print("\n[7/8] Scoring anomalies...")
+    logger.info("[7/8] Scoring anomalies...")
     flags, scores = _anomaly_detector.predict(feature_matrix)
     n_flagged = int(np.sum(flags))
     summary["steps"]["scoring"] = {
@@ -240,10 +265,10 @@ def run_full_pipeline() -> dict:
         "flagged": n_flagged,
         "flagged_pct": round(n_flagged / max(1, len(addresses)) * 100, 1),
     }
-    print(f"  ✓ {n_flagged}/{len(addresses)} wallets flagged ({summary['steps']['scoring']['flagged_pct']}%)")
+    logger.info(f"{n_flagged}/{len(addresses)} wallets flagged ({summary['steps']['scoring']['flagged_pct']}%)")
 
     # ── Step 8: Generate Explanations & Alerts ────────────────────
-    print("\n[8/8] Generating explanations and alerts...")
+    logger.info("[8/8] Generating explanations and alerts...")
     _explainer = AnomalyExplainer(_anomaly_detector)
     _explainer.initialize(feature_matrix)
 
@@ -345,9 +370,7 @@ def run_full_pipeline() -> dict:
     }
     summary["finished_at"] = datetime.utcnow().isoformat()
 
-    print(f"  ✓ {alerts_generated} alerts generated")
-    print("\n" + "=" * 60)
-    print("  Pipeline complete!")
-    print("=" * 60 + "\n")
+    logger.info(f"{alerts_generated} alerts generated")
+    logger.info("Pipeline complete!")
 
     return summary

@@ -8,6 +8,10 @@ from typing import Optional
 from app.ml.features import FEATURE_NAMES
 from app.config import settings
 
+from app.logging_config import get_logger
+
+logger = get_logger("app.ml.explainer")
+
 # KernelExplainer re-evaluates the model over thousands of masked feature
 # coalitions per wallet, which a 512 MB container cannot afford. Light mode
 # falls back to per-feature reconstruction error: coarser attribution over
@@ -26,7 +30,7 @@ def _shap_available() -> bool:
         shap = _shap
         return True
     except Exception as e:
-        print(f"⚠ SHAP not available ({e}). Using reconstruction-error attribution.")
+        logger.warning(f"SHAP not available ({e}). Using reconstruction-error attribution.")
         return False
 
 
@@ -63,7 +67,7 @@ class AnomalyExplainer:
             return errors.reshape(-1, 1)
 
         self.explainer = shap.KernelExplainer(predict_fn, self.background_data)
-        print(f"  ✓ SHAP explainer initialized with {n_samples} background samples")
+        logger.info(f"SHAP explainer initialized with {n_samples} background samples")
 
     def explain(self, features: np.ndarray, n_samples: int = 50) -> list[dict]:
         """
@@ -107,7 +111,7 @@ class AnomalyExplainer:
             return results
 
         except Exception as e:
-            print(f"  ⚠ SHAP explanation failed: {e}. Using fallback.")
+            logger.warning(f"SHAP explanation failed: {e}. Using fallback.")
             return self._fallback_explain(features)
 
     def explain_single(self, features: np.ndarray) -> list[dict]:

@@ -3,15 +3,23 @@ import { getHealth, getApiBaseUrl } from '../services/api';
 import { useOnline } from './useOnline';
 
 /**
- * Polls /api/health so the app can tell five states apart:
+ * Polls /api/health so the app can tell six states apart:
  *
- *   'down'    — the backend can't be reached and nothing is stored
- *   'offline' — no network, but the service worker has data from earlier
- *   'empty'   — reachable, but nothing has been ingested
- *   'ready'   — reachable with data
- *   'checking'— first probe in flight
+ *   'down'     — the backend can't be reached and nothing is stored
+ *   'offline'  — no network, but the service worker has data from earlier
+ *   'degraded' — reachable, but it cannot read its own database
+ *   'empty'    — reachable, and the database really is empty
+ *   'ready'    — reachable with data
+ *   'checking' — first probe in flight
  *
  * They render identically without this, and each needs a different fix.
+ *
+ * 'degraded' is the one that was missing. The backend used to answer a failed
+ * database read with `has_data: false`, so a broken database and an empty one
+ * arrived here as the same thing: the app told the operator to go and ingest
+ * data while the pages next to the banner rendered thousands of wallets from
+ * that same database. Now the backend reports `db_error`, and this keeps the
+ * two apart.
  */
 export function useBackendStatus(pollMs = 30000) {
   const [state, setState] = useState({
@@ -29,7 +37,9 @@ export function useBackendStatus(pollMs = 30000) {
       const health = res.data;
       // An SPA rewrite that swallows /api returns index.html with a 200, so
       // a successful request is not enough: check the body's shape.
-      if (!health || health.status !== 'healthy') {
+      // 'degraded' is still ChainTrace answering; only an unrecognised body
+      // (an SPA rewrite serving index.html, a proxy error page) is 'down'.
+      if (!health || (health.status !== 'healthy' && health.status !== 'degraded')) {
         setState({ status: 'down', health: null, cachedAt: null, error: 'Unexpected response from /api/health.' });
         return;
       }
@@ -37,6 +47,13 @@ export function useBackendStatus(pollMs = 30000) {
         // The service worker answered because the backend didn't. The data
         // is real but it is as old as its stamp says.
         setState({ status: 'offline', health, cachedAt: res.cachedAt, error: null });
+        return;
+      }
+      if (health.db_error) {
+        setState({
+          status: 'degraded', health, cachedAt: null,
+          error: `The backend cannot read its database: ${health.db_error}`,
+        });
         return;
       }
       setState({ status: health.has_data ? 'ready' : 'empty', health, cachedAt: null, error: null });

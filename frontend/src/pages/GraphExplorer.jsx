@@ -126,9 +126,20 @@ export default function GraphExplorer() {
     try {
       const res = await getNodeDetail(nodeId);
       if (res.data?.found) setDetail(res.data);
-      else setDetail({ id: nodeId, node_type: 'unknown', found: false });
-    } catch {
-      setDetail({ id: nodeId, node_type: 'unknown', found: false });
+      // Keep the backend's reason. Collapsing every outcome to a bare
+      // `found: false` is what turned "the graph you are looking at is older
+      // than the data behind it" into a blank panel labelled UNKNOWN.
+      else setDetail({ node_type: 'unknown', ...res.data, id: nodeId, found: false });
+    } catch (e) {
+      setDetail({
+        id: nodeId,
+        node_type: 'unknown',
+        found: false,
+        reason: 'request_failed',
+        detail: e.response
+          ? `The backend returned ${e.response.status} for this entity's record.`
+          : "The backend could not be reached for this entity's record.",
+      });
     } finally {
       setDetailLoading(false);
     }
@@ -598,6 +609,7 @@ export default function GraphExplorer() {
             else handleIsolate(id, 1);
           }}
           onPathFrom={startPath}
+          onReload={() => { clearSelection(); load(); }}
         />
       )}
     </div>

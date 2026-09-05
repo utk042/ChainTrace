@@ -15,6 +15,10 @@ from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from app.config import settings
 
+from app.logging_config import get_logger
+
+logger = get_logger("app.ml.torch_backend")
+
 
 class TransactionAutoencoder(nn.Module):
     """
@@ -145,7 +149,7 @@ class TorchAnomalyDetector:
             history["loss"].append(avg_loss)
 
             if (epoch + 1) % 20 == 0:
-                print(f"  Epoch {epoch + 1}/{epochs} — Loss: {avg_loss:.6f}")
+                logger.info(f"Epoch {epoch + 1}/{epochs} — Loss: {avg_loss:.6f}")
 
         # Compute anomaly threshold (percentile of reconstruction errors)
         self.model.eval()
@@ -157,7 +161,7 @@ class TorchAnomalyDetector:
         history["mean_error"] = float(np.mean(errors))
         history["max_error"] = float(np.max(errors))
 
-        print(f"  ✓ Training complete. Threshold: {self.threshold:.6f}")
+        logger.info(f"Training complete. Threshold: {self.threshold:.6f}")
 
         return history
 
@@ -205,7 +209,7 @@ class TorchAnomalyDetector:
             "scaler_scale": self.scaler.scale_,
             "threshold": self.threshold,
         }, path / "autoencoder.pt")
-        print(f"  ✓ Model saved to {path / 'autoencoder.pt'}")
+        logger.info(f"Model saved to {path / 'autoencoder.pt'}")
 
     def load(self, path: Path = None) -> bool:
         """Load model from disk. Returns True if successful."""
@@ -223,14 +227,14 @@ class TorchAnomalyDetector:
         # retrain — self-healing across a feature-schema change.
         checkpoint_dim = len(checkpoint.get("scaler_mean", []))
         if checkpoint_dim != settings.AE_INPUT_DIM:
-            print(f"  ⚠ Saved model expects {checkpoint_dim} features, current schema has "
+            logger.warning(f"Saved model expects {checkpoint_dim} features, current schema has "
                   f"{settings.AE_INPUT_DIM}. Discarding stale checkpoint, will retrain.")
             return False
 
         try:
             self.model.load_state_dict(checkpoint["model_state"])
         except RuntimeError as e:
-            print(f"  ⚠ Could not load model checkpoint ({e}). Will retrain.")
+            logger.warning(f"Could not load model checkpoint ({e}). Will retrain.")
             return False
 
         self.scaler.mean_ = checkpoint["scaler_mean"]
@@ -240,7 +244,7 @@ class TorchAnomalyDetector:
         self.is_trained = True
 
         self.model.eval()
-        print(f"  ✓ Model loaded from {model_file}")
+        logger.info(f"Model loaded from {model_file}")
         return True
 
     def predict_function(self, data: np.ndarray) -> np.ndarray:
