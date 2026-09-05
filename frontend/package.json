@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:icons && vite build",
+    "build": "npm run check:icons && npm run check:api-revision && vite build",
     "preview": "vite preview",
     "check:icons": "node scripts/check-icons.mjs",
-    "build:standalone": "npm run check:icons && vite build --mode standalone && node scripts/build-standalone.mjs",
-    "test:offline": "node tests/offline.spec.mjs"
+    "build:standalone": "npm run check:icons && npm run check:api-revision && vite build --mode standalone && node scripts/build-standalone.mjs",
+    "test:offline": "node tests/offline.spec.mjs",
+    "check:api-revision": "node scripts/check-api-revision.mjs"
   },
   "dependencies": {
     "@react-sigma/core": "^5.0.6",

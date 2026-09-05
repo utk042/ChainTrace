@@ -17,6 +17,8 @@
  * never leave an operator unsure whether what they are reading is live.
  */
 
+import { REQUIRED_API_REVISION } from './apiContract';
+
 const DEMO_KEY = 'CT_DEMO_MODE';
 
 export const isDemoMode = () => {
@@ -166,7 +168,15 @@ export async function demoAdapter(config) {
   // /api/graph/node/<id> and friends carry the id in the path.
   const tail = (prefix) => decodeURIComponent(url.slice(prefix.length));
 
-  if (url === '/api/health') return ok({ ...snap.health, demo: true }, config);
+  if (url === '/api/health') {
+    // The snapshot predates the revision field, and in snapshot mode this
+    // build is the backend — so it is current by construction. Without this
+    // the app would report itself as running against an out-of-date server.
+    return ok({
+      ...snap.health, status: 'healthy',
+      api_revision: REQUIRED_API_REVISION, demo: true,
+    }, config);
+  }
 
   if (url === '/api/dashboard/stats') return ok(snap.dashboard.stats, config);
   if (url === '/api/dashboard/timeline') return ok(snap.dashboard.timeline, config);
