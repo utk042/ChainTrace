@@ -312,6 +312,13 @@ whole table.
 | Focus the view | **Fit** (`F`) frames the whole graph; **Centre** (`C`) re-centres the selection; **Reset** (`R`) restores the original graph, clears filters and selection, and re-frames. |
 | Reduce clutter | **Filters** toggles node types and sets a minimum anomaly score. Applied instantly client-side — no refetch. |
 | Read the make-up | The **Histogram** panel counts what is actually on the canvas by object type and risk tier; clicking an object-type row toggles it, so the figure beside a type is always the number you are looking at. |
+
+Nodes are drawn as square pictogram tiles with the label centred underneath,
+the way the Gotham graph application draws its objects: the tile carries a
+glyph for the entity type, so what you are looking at is legible before you
+read a single identifier. The tile is filled with the node's risk colour, and
+identifiers are middle-elided in the label — a canvas of 60-character
+addresses printed in full is unreadable at any zoom.
 | Untangle | **Re-layout** (`L`) runs ForceAtlas2 over the current view in the browser. The layout dropdown re-runs a server-side layout instead. |
 | Take it with you | Export the view as PNG or JSON. |
 

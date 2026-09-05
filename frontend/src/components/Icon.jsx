@@ -8,7 +8,7 @@
  * spills is silently clipped by the viewBox and renders as a broken glyph.
  * `npm run check:icons` enforces that.
  */
-const PATHS = {
+export const PATHS = {
   // ─── Navigation ───────────────────────────────────────────────
   grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
   alertTriangle: 'M12 3.5 21.5 20h-19zM12 9.5v5M12 17.5h.01',
@@ -96,7 +96,7 @@ const PATHS = {
 };
 
 /** Names whose geometry is a solid shape rather than a stroked outline. */
-const FILLED = new Set(['play', 'zap']);
+export const FILLED = new Set(['play', 'zap']);
 
 export const ICON_NAMES = Object.keys(PATHS);
 

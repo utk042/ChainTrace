@@ -130,13 +130,13 @@
   --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
 
-  --text-xs: 10px;      /* micro labels */
-  --text-sm: 11px;      /* dense body, table cells, chrome */
-  --text-base: 12px;    /* default body */
-  --text-md: 13px;      /* section heads */
-  --text-lg: 15px;      /* panel titles */
-  --text-xl: 17px;      /* page titles */
-  --text-2xl: 22px;     /* KPI figures */
+  --text-xs: 11px;      /* micro labels */
+  --text-sm: 12px;      /* dense body, table cells, chrome */
+  --text-base: 13px;    /* default body */
+  --text-md: 14px;      /* section heads */
+  --text-lg: 16px;      /* panel titles */
+  --text-xl: 19px;      /* page titles */
+  --text-2xl: 26px;     /* KPI figures */
 
   --tracking-label: 0.07em;
 
@@ -160,13 +160,13 @@
   --shadow-control: inset 0 0 0 1px rgba(17, 20, 24, 0.4), inset 0 -1px 0 rgba(17, 20, 24, 0.3);
 
   /* Chrome metrics */
-  --titlebar-h: 30px;
-  --menubar-h: 26px;
-  --statusbar-h: 22px;
-  --rail-w: 32px;
-  --control-h: 24px;
-  --control-h-lg: 28px;
-  --row-h: 26px;
+  --titlebar-h: 34px;
+  --menubar-h: 28px;
+  --statusbar-h: 26px;
+  --rail-w: 38px;
+  --control-h: 26px;
+  --control-h-lg: 30px;
+  --row-h: 30px;
 
   /* Layered stacking, declared once so nothing has to guess. */
   --z-base: 0;
@@ -328,8 +328,8 @@ code, pre, .mono { font-family: var(--font-mono); }
   align-items: center;
   gap: var(--space-sm);
   align-self: center;
-  width: clamp(160px, 22vw, 280px);
-  height: 22px;
+  width: clamp(180px, 22vw, 300px);
+  height: 26px;
   padding: 0 var(--space-sm);
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -376,7 +376,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   gap: var(--space-sm);
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 190px;
+  max-width: 210px;
   padding: 0 var(--space-md);
   background: var(--gt-black);
   color: var(--text-tertiary);
@@ -479,7 +479,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 18px;
+  height: 20px;
   padding: 0 var(--space-sm);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
@@ -520,8 +520,8 @@ code, pre, .mono { font-family: var(--font-mono); }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
   flex-shrink: 0;
@@ -658,7 +658,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   align-items: center;
   gap: var(--space-md);
   width: 100%;
-  padding: 5px var(--space-md);
+  padding: 6px var(--space-md);
   font-size: var(--text-sm);
   color: var(--text-secondary);
   text-align: left;
@@ -712,7 +712,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  min-height: 28px;
+  min-height: 32px;
   padding: 0 var(--space-md);
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
@@ -816,14 +816,14 @@ code, pre, .mono { font-family: var(--font-mono); }
 .tab.active { color: var(--text-primary); border-bottom-color: var(--accent); }
 
 .tab-count {
-  min-width: 16px;
+  min-width: 18px;
   padding: 0 4px;
   border-radius: 2px;
   background: var(--bg-control);
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  line-height: 15px;
+  line-height: 17px;
   text-align: center;
 }
 
@@ -871,7 +871,7 @@ code, pre, .mono { font-family: var(--font-mono); }
 .btn-minimal { background: transparent; box-shadow: none; color: var(--text-secondary); }
 .btn-minimal:hover:not(:disabled) { background: rgba(143, 153, 168, 0.15); color: var(--text-primary); }
 
-.btn-sm { height: 20px; padding: 0 var(--space-sm); font-size: var(--text-xs); }
+.btn-sm { height: 22px; padding: 0 var(--space-sm); font-size: var(--text-xs); }
 .btn-lg { height: var(--control-h-lg); padding: 0 var(--space-lg); font-size: var(--text-base); }
 
 .btn-block { width: 100%; }
@@ -880,8 +880,8 @@ code, pre, .mono { font-family: var(--font-mono); }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
   flex-shrink: 0;
@@ -975,7 +975,7 @@ textarea.input { height: auto; padding: var(--space-sm); resize: vertical; line-
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 20px;
+  height: 22px;
   padding: 0 var(--space-sm);
   background: var(--bg-control);
   border-radius: var(--radius-sm);
@@ -995,7 +995,7 @@ textarea.input { height: auto; padding: var(--space-sm); resize: vertical; line-
   align-items: center;
   gap: var(--space-sm);
   max-width: 100%;
-  height: 20px;
+  height: 22px;
   padding: 0 var(--space-sm);
   background: var(--bg-control);
   border-radius: var(--radius-sm);
@@ -1039,9 +1039,9 @@ textarea.input { height: auto; padding: var(--space-sm); resize: vertical; line-
 
 .toggle-switch {
   position: relative;
-  width: 30px;
-  height: 16px;
-  border-radius: 8px;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
   background: var(--bg-control);
   cursor: pointer;
   flex-shrink: 0;
@@ -1055,14 +1055,14 @@ textarea.input { height: auto; padding: var(--space-sm); resize: vertical; line-
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: var(--text-primary);
   transition: transform var(--transition-fast);
 }
 
-.toggle-switch.active::after { transform: translateX(14px); }
+.toggle-switch.active::after { transform: translateX(16px); }
 
 .check {
   display: inline-flex;
@@ -1097,8 +1097,8 @@ kbd {
   align-items: center;
   gap: 4px;
   max-width: 100%;
-  height: 16px;
-  padding: 0 5px;
+  height: 18px;
+  padding: 0 6px;
   border-radius: var(--radius-sm);
   background: var(--bg-control);
   color: var(--text-secondary);
@@ -1143,7 +1143,7 @@ kbd {
   top: 0;
   z-index: var(--z-raised);
   padding: 0 var(--space-md);
-  height: 26px;
+  height: 30px;
   background: var(--bg-well);
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
@@ -1260,7 +1260,7 @@ kbd {
 
 .histogram-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 88px;
+  grid-template-columns: minmax(0, 1fr) auto 92px;
   align-items: center;
   gap: var(--space-sm);
   width: 100%;
@@ -1345,7 +1345,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  min-height: 28px;
+  min-height: 32px;
   padding: 0 var(--space-md);
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
@@ -1638,7 +1638,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  min-height: 32px;
+  min-height: 38px;
   padding: var(--space-xs) var(--space-md);
   background: var(--bg-chrome);
   border-bottom: 1px solid var(--border);
@@ -1686,7 +1686,7 @@ kbd {
 .tool-group:last-child { border-right: none; }
 
 .tool-group-label {
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
   color: var(--text-muted);
@@ -1699,7 +1699,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 22px;
+  height: 26px;
   padding: 0 var(--space-sm);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
@@ -1713,8 +1713,8 @@ kbd {
 .tool-btn.active { background: var(--accent-strong); color: var(--text-on-accent); }
 
 .tool-select {
-  height: 22px;
-  max-width: 150px;
+  height: 26px;
+  max-width: 160px;
   padding: 0 20px 0 var(--space-sm);
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -2014,7 +2014,28 @@ button.stat-tile:hover { background: var(--bg-well); }
 }
 
 .graph-canvas { position: absolute; inset: 0; }
-.graph-canvas .sigma-container { width: 100%; height: 100%; background: transparent !important; }
+
+/* @react-sigma ships `div.react-sigma { background: var(--sigma-background-color) }`
+   with that variable defaulting to #fff on :root. Its stylesheet is a route
+   chunk that loads after this one, so a competing :root declaration here
+   would lose on source order. Setting the variables on the stage instead
+   wins by proximity — an inherited custom property resolves from the nearest
+   ancestor that declares it, whatever the sheet order. */
+.graph-stage {
+  --sigma-background-color: transparent;
+  --sigma-controls-background-color: var(--bg-well);
+  --sigma-controls-background-color-hover: var(--bg-hover);
+  --sigma-controls-border-color: var(--border);
+  --sigma-controls-color: var(--text-primary);
+}
+
+.graph-canvas div.react-sigma,
+.graph-canvas .sigma-container {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
 .graph-canvas .sigma-container > .react-sigma-control { display: none; }
 
 .graph-side {
@@ -2211,8 +2232,8 @@ button.stat-tile:hover { background: var(--bg-well); }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   color: var(--text-tertiary);
   border-bottom: 1px solid var(--border);
 }
@@ -2485,8 +2506,8 @@ button.stat-tile:hover { background: var(--bg-well); }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 58px;
-  height: 58px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -2495,8 +2516,8 @@ button.stat-tile:hover { background: var(--bg-well); }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
   background: var(--bg-panel);
   font-family: var(--font-mono);
@@ -2559,8 +2580,8 @@ button.stat-tile:hover { background: var(--bg-well); }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background: var(--bg-control);
   color: var(--text-muted);

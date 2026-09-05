@@ -49,9 +49,11 @@ export const RISK_COLORS = {
 
 /** Canvas colours that aren't entity data. */
 export const CANVAS = {
+  // The graph ground, so an exported PNG matches what is on screen.
+  background: '#111418',
   dimNode: '#2f343c',
-  dimEdge: '#252a31',
-  edge: '#404854',
+  dimEdge: '#20252b',
+  edge: '#5f6b7c',
   highlight: ACCENT,
   path: '#ec9a3c',
   label: '#c5cbd3',
@@ -60,13 +62,20 @@ export const CANVAS = {
   hoverText: TEXT.primary,
 };
 
-/** Edge colours by relationship, muted enough to stay context. */
+/**
+ * Edge colours by relationship.
+ *
+ * Kept near-neutral and light rather than saturated: on a dark canvas the
+ * links are the connective tissue, and a graph drawn in six competing hues
+ * reads as decoration. Each is a tint of the neutral ramp, distinguishable
+ * side by side without any of them fighting the nodes for attention.
+ */
 export const EDGE_COLORS = {
-  co_input: '#634dbf',      // co-ownership inference
-  wallet_input: '#2d72d2',
-  wallet_output: '#238551',
-  ip_observed_tx: '#5f6b7c',
-  unknown: '#404854',
+  co_input: '#8579c9',      // co-ownership inference — the one real inference
+  wallet_input: '#6b7f9e',
+  wallet_output: '#5f8a75',
+  ip_observed_tx: '#6b7280',
+  unknown: '#525c69',
 };
 
 export const nodeColor = (nodeType, riskTier) =>
