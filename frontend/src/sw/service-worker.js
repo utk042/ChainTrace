@@ -35,7 +35,14 @@ const SHELL_URL = new URL('index.html', self.registration.scope).pathname;
 /** Cap on stored API responses; oldest insertions are evicted first. */
 const API_CACHE_LIMIT = 160;
 
-/** How long to wait on the network before falling back to cache, in ms. */
+/**
+ * How long to wait for the backend before serving a stored copy instead.
+ *
+ * This is a preference, not a deadline: it decides *when the cache is better
+ * than waiting*, and it only applies when there is something cached. A read
+ * with no stored copy waits for the network however long it takes, because
+ * failing early buys nothing — see handleApi.
+ */
 const NETWORK_TIMEOUT = 6000;
 
 const CACHE_HEADER = 'x-chaintrace-cache';
@@ -105,16 +112,8 @@ const isPrecachedAsset = (url) =>
     || url.pathname.startsWith('/icons/')
     || url.pathname.endsWith('.webmanifest'));
 
-/** Network with a deadline, so a hung connection still falls back to cache. */
-function fetchWithTimeout(request, ms) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('network timeout')), ms);
-    fetch(request).then(
-      (res) => { clearTimeout(timer); resolve(res); },
-      (err) => { clearTimeout(timer); reject(err); },
-    );
-  });
-}
+/** Resolves to null after `ms`. Used to prefer a stored copy, never to fail. */
+const after = (ms) => new Promise((resolve) => setTimeout(() => resolve(null), ms));
 
 // ─── Strategies ─────────────────────────────────────────────────────
 
@@ -168,22 +167,45 @@ async function handleAsset(request) {
 /**
  * Backend reads. Live data wins; the cache is the fallback, never the
  * default, and what it returns is labelled with its age.
+ *
+ * The timeout used to apply to every read, cached or not. On a large case it
+ * turned a working backend into an unreachable one: `/api/graph/data` over a
+ * 17,000-node graph spends several seconds building the graph and computing
+ * a layout, the six-second deadline fired, nothing was stored to fall back
+ * to, and the Graph Explorer reported "Cannot reach the backend" over a
+ * server that was busy answering it. Giving up early is only ever worth
+ * doing when there is something better to show.
  */
-async function handleApi(request) {
+async function handleApi(request, event) {
   const cache = await caches.open(API_CACHE);
-  try {
-    const response = await fetchWithTimeout(request.clone(), NETWORK_TIMEOUT);
+
+  const fromNetwork = (async () => {
+    const response = await fetch(request.clone());
     if (response.ok) {
       const stamped = await stamp(response.clone(), new Date().toISOString());
       await cache.put(request, stamped);
       trimCache(API_CACHE, API_CACHE_LIMIT);
     }
     return response;
-  } catch (err) {
-    const cached = await cache.match(request);
-    if (cached) return markAsHit(cached);
-    throw err;
+  })();
+
+  const cached = await cache.match(request);
+  if (!cached) {
+    // Nothing stored: the network is the only answer there is.
+    return fromNetwork;
   }
+
+  // Something stored: prefer live, but not at the cost of a long stare at a
+  // blank panel. Whatever the network eventually returns still lands in the
+  // cache for the next read.
+  const winner = await Promise.race([
+    fromNetwork.catch(() => null),
+    after(NETWORK_TIMEOUT),
+  ]);
+  if (winner) return winner;
+
+  event?.waitUntil(fromNetwork.catch(() => {}));
+  return markAsHit(cached);
 }
 
 self.addEventListener('fetch', (event) => {
@@ -199,7 +221,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (isApiRequest(url)) {
-    event.respondWith(handleApi(request));
+    event.respondWith(handleApi(request, event));
     return;
   }
   if (isPrecachedAsset(url)) {

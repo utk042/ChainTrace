@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from 'react';
 import Icon from '../Icon';
 import Collapse from '../ui/Collapse';
 import CopyButton from '../ui/CopyButton';
@@ -5,6 +6,7 @@ import { Loading, Notice } from '../ui/States';
 import {
   shortId, fmtNum, fmtBtc, fmtInt, fmtTimestamp, scoreVar,
 } from '../../services/format';
+import { getNotes, createNote, deleteNote } from '../../services/api';
 
 /**
  * Everything known about the selected entity, in one panel.
@@ -28,6 +30,161 @@ function Row({ label, value, mono = false }) {
       <span className="prop-label">{label}</span>
       <span className={`prop-value${mono ? ' mono' : ''}`}>{value}</span>
     </div>
+  );
+}
+
+
+/**
+ * One direction of a wallet's links.
+ *
+ * Rendered as its own group rather than a column in a combined list: an
+ * investigator reads "what came in" and "what went out" as two questions,
+ * and a `direction` field buried in a row of metadata does not answer either
+ * at a glance.
+ */
+function CounterpartyGroup({ title, icon, rows, note, onSelectNode }) {
+  if (!rows?.length) return null;
+  return (
+    <Collapse title={title} count={rows.length} icon={icon}>
+      {note && <p className="inspector-note">{note}</p>}
+      {rows.map((c, i) => (
+        <button
+          key={`${c.id}-${c.direction}-${i}`}
+          type="button"
+          className="link-row"
+          onClick={() => onSelectNode(c.id)}
+          title={c.id}
+        >
+          <span className={`legend-dot ${c.node_type}`} />
+          <code>{shortId(c.id, 10, 6)}</code>
+          <span className="link-row-meta">
+            {c.edge_type?.replace(/_/g, ' ')}
+            {c.amount != null && ` · ${Number(c.amount).toFixed(4)} BTC`}
+          </span>
+        </button>
+      ))}
+    </Collapse>
+  );
+}
+
+/**
+ * Findings recorded against this entity.
+ *
+ * Notes go to the backend, not to this browser: they are what an analyst
+ * concluded and why, which is case material. One kept in local storage is
+ * lost with a cleared cache, invisible to a colleague on the same data, and
+ * missing from an export.
+ */
+function NotesPanel({ entityId, entityType }) {
+  const [notes, setNotes] = useState([]);
+  const [draft, setDraft] = useState('');
+  const [author, setAuthor] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!entityId) return;
+    try {
+      const res = await getNotes(entityId);
+      setNotes(res.data?.notes || []);
+      setError(null);
+    } catch {
+      setNotes([]);
+      setError('Notes could not be loaded.');
+    }
+  }, [entityId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    const body = draft.trim();
+    if (!body) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await createNote({ entity_id: entityId, entity_type: entityType, body, author: author.trim() || null });
+      setDraft('');
+      await load();
+    } catch (e) {
+      setError(e.response?.data?.error || e.response?.data?.detail
+        || 'The note could not be saved. In snapshot mode there is no backend to write to.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (noteId) => {
+    setBusy(true);
+    try {
+      await deleteNote(noteId);
+      await load();
+    } catch {
+      setError('The note could not be deleted.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Collapse title="Notes & findings" count={notes.length || undefined} icon="edit">
+      <div className="notes-panel">
+        {error && <Notice kind="warn">{error}</Notice>}
+
+        {notes.map((n) => (
+          <div key={n.note_id} className="note-item">
+            <div className="note-item-head">
+              <span className="note-item-meta">
+                {n.author ? `${n.author} · ` : ''}
+                {n.created_at ? String(n.created_at).replace('T', ' ').slice(0, 16) : ''}
+                {n.updated_at && n.updated_at !== n.created_at ? ' (edited)' : ''}
+              </span>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => remove(n.note_id)}
+                disabled={busy}
+                aria-label="Delete this note"
+                title="Delete this note"
+              >
+                <Icon name="trash" size={11} />
+              </button>
+            </div>
+            <p className="note-item-body">{n.body}</p>
+          </div>
+        ))}
+
+        {notes.length === 0 && (
+          <p className="inspector-note">
+            No findings recorded against this entity yet.
+          </p>
+        )}
+
+        <textarea
+          className="input note-draft"
+          rows={3}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="What did you conclude about this entity, and why?"
+          maxLength={8000}
+        />
+        <div className="note-actions">
+          <input
+            className="input note-author"
+            value={author}
+            onChange={(e) => setAuthor(e.target.value)}
+            placeholder="Your name (optional)"
+            maxLength={120}
+          />
+          <button className="btn btn-primary" onClick={save} disabled={busy || !draft.trim()}>
+            {busy ? 'Saving…' : 'Save finding'}
+          </button>
+        </div>
+        <p className="inspector-note">
+          Notes are stored with the case, not in this browser, so they survive
+          a cleared cache and are visible to anyone else working this dataset.
+        </p>
+      </div>
+    </Collapse>
   );
 }
 
@@ -144,6 +301,23 @@ export default function NodeInspector({
       )}
 
       <div className={`inspector-scroll${missing ? ' is-muted' : ''}`}>
+        {detail.summary && (
+          <Collapse title="In plain language" defaultOpen>
+            <div className="plain-summary">
+              {detail.summary.what_it_is?.map((line) => <p key={line}>{line}</p>)}
+              {detail.summary.why_flagged?.length > 0 && (
+                <>
+                  <div className="section-label">Why it was flagged</div>
+                  {detail.summary.why_flagged.map((line) => <p key={line}>{line}</p>)}
+                </>
+              )}
+              {detail.summary.caveat && (
+                <p className="plain-summary-caveat">{detail.summary.caveat}</p>
+              )}
+            </div>
+          </Collapse>
+        )}
+
         <Collapse title="Connections" count={detail.degree}>
           <div className="prop-list">
             <Row label="Total links" value={fmtInt(detail.degree)} />
@@ -249,25 +423,35 @@ export default function NodeInspector({
         )}
 
         {detail.counterparties?.length > 0 && (
-          <Collapse title="Top counterparties" count={detail.counterparties.length}>
-            {detail.counterparties.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className="link-row"
-                onClick={() => onSelectNode(c.id)}
-                title={c.id}
-              >
-                <span className={`legend-dot ${c.node_type}`} />
-                <code>{shortId(c.id, 10, 6)}</code>
-                <span className="link-row-meta">
-                  {c.edge_type?.replace(/_/g, ' ')}
-                  {c.amount != null && ` · ${Number(c.amount).toFixed(4)}`}
-                </span>
-              </button>
-            ))}
-          </Collapse>
+          <>
+            {/* Split by direction. Listed together, a wallet's links were an
+                undifferentiated set and the first question anyone asks of a
+                wallet — what came in, what went out — could not be answered
+                from the panel at all. */}
+            <CounterpartyGroup
+              title="Money in"
+              icon="arrowDown"
+              rows={detail.counterparties.filter((c) => c.direction === 'in')}
+              onSelectNode={onSelectNode}
+            />
+            <CounterpartyGroup
+              title="Money out"
+              icon="arrowUp"
+              rows={detail.counterparties.filter((c) => c.direction === 'out')}
+              onSelectNode={onSelectNode}
+            />
+            <CounterpartyGroup
+              title="Related, no value moved"
+              icon="link"
+              note="Co-input and network observations. These are inferences about
+                    common control or where traffic was seen, not payments."
+              rows={detail.counterparties.filter((c) => c.direction !== 'in' && c.direction !== 'out')}
+              onSelectNode={onSelectNode}
+            />
+          </>
         )}
+
+        <NotesPanel entityId={id} entityType={type} />
       </div>
     </div>
   );

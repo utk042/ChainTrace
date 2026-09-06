@@ -158,6 +158,14 @@ export const generateSampleData = (count = 5000) => api.post(`/api/ingest/genera
 export const fetchRealData = (maxTransactions = 500, maxBlocks = 10) =>
   api.post(`/api/ingest/fetch-real?max_transactions=${maxTransactions}&max_blocks=${maxBlocks}`, null, { timeout: 300000 });
 
+// ─── Analyst notes ───────────────────────────────────────────
+export const getNotes = (entityId) =>
+  api.get('/api/notes', { params: entityId ? { entity_id: entityId } : {} });
+export const getNoteCounts = () => api.get('/api/notes/counts');
+export const createNote = (note) => api.post('/api/notes', note);
+export const updateNote = (noteId, body) => api.put(`/api/notes/${noteId}`, body);
+export const deleteNote = (noteId) => api.delete(`/api/notes/${encodeURIComponent(noteId)}`);
+
 // ─── Settings ────────────────────────────────────────────────
 export const getSettings = () => api.get('/api/settings');
 export const updateSettings = (updates) => api.put('/api/settings', updates);

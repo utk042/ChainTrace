@@ -44,6 +44,8 @@ export const PATHS = {
   circle: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z',
   circleDot: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 12h.01',
   flag: 'M5 21V4M5 4h13l-3 4 3 4H5',
+  // Pencil, for the notes editor.
+  edit: 'M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3z',
   globe: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM4 12h16M12 4a13 13 0 0 1 0 16M12 4a13 13 0 0 0 0 16',
   info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 7.75h.01',
   clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3.5 2',
@@ -89,6 +91,9 @@ export const PATHS = {
   sortAsc: 'M12 19.5v-15M6.5 10L12 4.5 17.5 10',
   sortDesc: 'M12 4.5v15M6.5 14l5.5 5.5 5.5-5.5',
   arrowRight: 'M4 12h15.5M13.5 6l6 6-6 6',
+  // Direction of value, for the inspector's money-in / money-out groups.
+  arrowDown: 'M12 4.5v15M6 13.5l6 6 6-6',
+  arrowUp: 'M12 19.5v-15M6 10.5l6-6 6 6',
   externalLink: 'M13.5 4.5h6v6M19.5 4.5l-8.5 8.5M18 14v4.5A1.5 1.5 0 0 1 16.5 20h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10',
   moreHorizontal: 'M6 12h.01M12 12h.01M18 12h.01',
   collapseLeft: 'M11 5.5 5.5 12 11 18.5M19 5.5 13.5 12 19 18.5',

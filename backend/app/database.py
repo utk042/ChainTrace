@@ -199,6 +199,33 @@ def _init_schema(con: duckdb.DuckDBPyConnection) -> None:
         );
     """)
 
+    # Analyst findings against an entity.
+    #
+    # These are case material — what a person concluded about a wallet and
+    # why — so they live with the case, not in the browser. A note kept in
+    # localStorage is lost to a cleared cache, invisible to anyone else
+    # working the same data, and absent from an export, which for a forensic
+    # record is worse than not having taken it.
+    #
+    # `entity_id` is not a foreign key on purpose: an analyst can annotate an
+    # address before it is ingested, and re-running the pipeline must not
+    # delete anyone's findings.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS entity_notes (
+            note_id     VARCHAR PRIMARY KEY,
+            entity_id   VARCHAR NOT NULL,
+            entity_type VARCHAR,
+            body        TEXT NOT NULL,
+            author      VARCHAR,
+            created_at  TIMESTAMP,
+            updated_at  TIMESTAMP
+        );
+    """)
+    con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_entity_notes_entity
+        ON entity_notes (entity_id);
+    """)
+
 
 def init_database() -> None:
     """Open the process connection and create the schema (called at startup)."""

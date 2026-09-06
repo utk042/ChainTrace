@@ -412,6 +412,11 @@ export async function demoAdapter(config) {
     return row ? ok(row, config) : fail(config, 404, 'Transaction not in this snapshot.');
   }
 
+  // Notes live in the case database, and a snapshot has none. An empty list
+  // is the truth here; the write path already refuses with WRITE_REFUSED.
+  if (url === '/api/notes') return ok({ notes: [], total: 0 }, config);
+  if (url === '/api/notes/counts') return ok({ counts: {} }, config);
+
   if (url === '/api/settings') return ok(snap.settings, config);
   if (url === '/api/settings/seed-wallets') return ok(snap.seed_wallets, config);
 
