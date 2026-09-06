@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
-  uploadFile, runPipeline, getPipelineStatus, getPipelineLogs,
-  generateSampleData, fetchRealData,
+  uploadFile, runPipeline, getPipelineLogs, generateSampleData, fetchRealData,
 } from '../services/api';
 import { useSession } from '../state/SessionProvider';
 import { useCommands } from '../services/commands';
@@ -42,13 +41,17 @@ const STEP_ICONS = {
  * spend time disproving.
  */
 export default function Ingest() {
-  const { refreshStats, demo } = useSession();
+  // The run itself is polled once for the whole window (state/SessionProvider),
+  // because every other view needs to know a run is on in order to hold itself
+  // back. This page only adds what is local to it: the chosen file, the upload,
+  // and the log panel.
+  const {
+    demo, ingest: pipelineStatus, ingesting, refreshIngest,
+    noteIngestStarted, noteIngestFailed,
+  } = useSession();
 
   const [file, setFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState(null);
-  const [pipelineStatus, setPipelineStatus] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [polling, setPolling] = useState(false);
   const [logs, setLogs] = useState([]);
   const [logFile, setLogFile] = useState(null);
   const [showLogs, setShowLogs] = useState(false);
@@ -57,16 +60,9 @@ export default function Ingest() {
   const fileInputRef = useRef(null);
   const logEndRef = useRef(null);
 
-  useEffect(() => {
-    getPipelineStatus()
-      .then((res) => {
-        if (res.data?.status) {
-          setPipelineStatus(res.data);
-          if (res.data.status === 'running') { setPolling(true); setIsProcessing(true); }
-        }
-      })
-      .catch(() => {});
-  }, []);
+  // Covers the whole window, including the stretch between the click and the
+  // backend's first "running" — see state/SessionProvider.
+  const isProcessing = ingesting;
 
   // The backend's own log for this run. A pipeline that fails on a machine
   // where the server's terminal is out of sight — or gone entirely — left the
@@ -81,43 +77,49 @@ export default function Ingest() {
     }
   }, []);
 
+  // The shared poll updates `pipelineStatus` roughly every 1.5s while a run is
+  // on, so following it keeps the log in step without a second timer of its
+  // own. Only while the panel is open: tailing a log nobody is reading is a
+  // request every 1.5s for the length of the run.
+  const status = pipelineStatus?.status;
+  const runId = pipelineStatus?.run_id;
   useEffect(() => {
-    if (!polling) return undefined;
-    const timer = setInterval(async () => {
-      try {
-        const res = await getPipelineStatus();
-        setPipelineStatus(res.data);
-        refreshLogs(res.data?.run_id);
-        if (res.data.status === 'completed' || res.data.status === 'error') {
-          setPolling(false);
-          setIsProcessing(false);
-          // A failed run is the one an operator needs to read, so open the
-          // log instead of making them go looking for it.
-          if (res.data.status === 'error') setShowLogs(true);
-          if (res.data.status === 'completed') refreshStats();
-        }
-      } catch { /* transient; the next tick retries */ }
-    }, 1500);
-    return () => clearInterval(timer);
-  }, [polling, refreshLogs, refreshStats]);
+    if (!runId || !showLogs) return;
+    refreshLogs(runId);
+  }, [runId, status, pipelineStatus?.stage, pipelineStatus?.progress, showLogs, refreshLogs]);
+
+  // A failed run is the one an operator needs to read, so open the log
+  // instead of making them go looking for it.
+  useEffect(() => {
+    if (status === 'error') setShowLogs(true);
+  }, [status, runId]);
 
   useEffect(() => {
     if (showLogs) logEndRef.current?.scrollIntoView({ block: 'nearest' });
   }, [logs, showLogs]);
 
   useCommands({
-    reload: () => getPipelineStatus().then((res) => setPipelineStatus(res.data)).catch(() => {}),
+    reload: () => { refreshIngest(); if (showLogs) refreshLogs(runId); },
   });
 
+  // The dropzone is inert while a run is on. A file taken in mid-run would sit
+  // in the picker looking ready to send against an Upload button the backend
+  // will refuse, so it is not taken in at all.
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     setDragging(false);
+    if (isProcessing) return;
     const dropped = e.dataTransfer?.files?.[0];
     if (dropped) setFile(dropped);
-  }, []);
+  }, [isProcessing]);
+
+  const openFilePicker = useCallback(() => {
+    if (isProcessing) return;
+    fileInputRef.current?.click();
+  }, [isProcessing]);
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file || isProcessing) return;
     try {
       setUploadStatus({ status: 'uploading', message: 'Uploading file…' });
       const res = await uploadFile(file);
@@ -131,19 +133,20 @@ export default function Ingest() {
   };
 
   const launch = async (label, start) => {
+    if (isProcessing) return;
     try {
-      setIsProcessing(true);
-      setPipelineStatus({ status: 'running', progress: 5, message: label });
+      // Announced to the whole window on the click, so the other tabs close
+      // over their data now rather than up to a poll from now.
+      noteIngestStarted({ progress: 5, message: label, stages: [] });
       await start();
-      setPolling(true);
+      await refreshIngest();
     } catch (e) {
-      setPipelineStatus({
-        status: 'error',
-        progress: 0,
-        message: `Failed: ${e.response?.data?.error || e.message}`,
-      });
-      setPolling(false);
-      setIsProcessing(false);
+      noteIngestFailed(
+        `Failed: ${e.response?.data?.error || e.response?.data?.detail || e.message}`,
+      );
+      // A refusal (409) means a run really is still going and this launch was
+      // never the one in flight, so let the backend have the last word.
+      refreshIngest();
     }
   };
 
@@ -157,8 +160,7 @@ export default function Ingest() {
     async () => {
       const res = await fetchRealData(500, 10);
       if (res.data.error) throw new Error(res.data.error);
-      setPipelineStatus({
-        status: 'running',
+      noteIngestStarted({
         progress: 25,
         message: `${res.data.count} real transactions fetched. Launching the analysis pipeline…`,
       });
@@ -170,8 +172,7 @@ export default function Ingest() {
     'Generating 5,000 synthetic transactions…',
     async () => {
       const res = await generateSampleData(5000);
-      setPipelineStatus({
-        status: 'running',
+      noteIngestStarted({
         progress: 25,
         message: 'Sample generated. Launching the analysis pipeline…',
       });
@@ -179,7 +180,11 @@ export default function Ingest() {
     },
   );
 
-  const status = pipelineStatus?.status;
+  // A backend that has not run anything since it started reports 'idle'. That
+  // is not a run, so it gets the empty state rather than an execution panel
+  // holding a blank message over a bar at zero.
+  const hasRun = Boolean(pipelineStatus) && status !== 'idle';
+
   const progressColor = status === 'error' ? 'var(--risk-critical)'
     : status === 'completed' ? 'var(--status-ok)' : undefined;
 
@@ -288,30 +293,46 @@ export default function Ingest() {
           </Notice>
         )}
 
+        {isProcessing && (
+          <Notice kind="warn">
+            A run is in progress, so loading more data is unavailable until it
+            finishes. It has cleared the tables and is writing the new dataset;
+            a second file arriving now would end up in a dataset nobody could
+            account for afterwards. The other views are held back for the same
+            reason.
+          </Notice>
+        )}
+
         <div
-          className={`dropzone${dragging || file ? ' active' : ''}`}
+          className={`dropzone${dragging || file ? ' active' : ''}${isProcessing ? ' disabled' : ''}`}
           onDrop={handleDrop}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragOver={(e) => { e.preventDefault(); if (!isProcessing) setDragging(true); }}
           onDragLeave={() => setDragging(false)}
-          onClick={() => fileInputRef.current?.click()}
-          onKeyDown={(e) => { if (e.key === 'Enter') fileInputRef.current?.click(); }}
+          onClick={openFilePicker}
+          onKeyDown={(e) => { if (e.key === 'Enter') openFilePicker(); }}
           role="button"
-          tabIndex={0}
+          tabIndex={isProcessing ? -1 : 0}
+          aria-disabled={isProcessing}
         >
           <Icon name="uploadCloud" size={26} />
           <span className="dropzone-text">
-            {file ? file.name : 'Drop a .csv, .json or .xml blockchain export here'}
+            {isProcessing
+              ? 'Loading data is unavailable while a run is in progress'
+              : file ? file.name : 'Drop a .csv, .json or .xml blockchain export here'}
           </span>
           <span className="dropzone-sub">
-            {file
-              ? `${(file.size / 1024).toFixed(1)} KB — use Actions ▸ Upload to send it`
-              : 'or click to browse — the file is parsed on your own backend, never uploaded elsewhere'}
+            {isProcessing
+              ? 'The stage tracker below says where the run has got to.'
+              : file
+                ? `${(file.size / 1024).toFixed(1)} KB — use Actions ▸ Upload to send it`
+                : 'or click to browse — the file is parsed on your own backend, never uploaded elsewhere'}
           </span>
           <input
             ref={fileInputRef}
             type="file"
             accept=".csv,.json,.xml"
             style={{ display: 'none' }}
+            disabled={isProcessing}
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
         </div>
@@ -377,7 +398,7 @@ export default function Ingest() {
           </Panel>
         )}
 
-        {pipelineStatus && (
+        {hasRun && (
           <Panel
             icon="terminal"
             title="Pipeline execution"
@@ -495,7 +516,7 @@ export default function Ingest() {
           </Panel>
         )}
 
-        {!pipelineStatus && (
+        {!hasRun && (
           <Empty icon="database" title="No pipeline run in this session">
             Upload an export, fetch live blockchain data, or generate a sample to
             start one. Progress, stage results and the backend's own log all appear

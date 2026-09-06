@@ -11,9 +11,11 @@ from typing import Optional
 from app.database import get_db_readonly
 from app.graph.builder import (
     get_subgraph, get_graph_stats, build_entity_graph, apply_scores_from_db,
+    collapse_to_entities, is_entity_node_id, entity_id_from_node,
 )
 from app.graph.serializer import (
-    graph_to_json, _serialize_edges, NODE_COLORS, RISK_COLORS, _node_size, _truncate,
+    graph_to_json, _serialize_edges, NODE_COLORS, RISK_COLORS, _node_size,
+    _truncate, _node_label,
 )
 from app.ml.trainer import get_entity_graph, get_clusters
 
@@ -86,6 +88,42 @@ def _resolve_graph() -> Optional[nx.Graph]:
         return None
 
 
+def _entity_view(G: nx.Graph) -> nx.Graph:
+    """
+    The address graph with every co-spending group drawn as one actor.
+
+    Cached on the source graph, because it is derived from it and a rebuild
+    replaces the source outright. `apply_scores_from_db` drops the cache when
+    it rewrites the scores, so the collapsed copy cannot outlive the figures it
+    aggregated.
+    """
+    cached = G.graph.get("_entity_view")
+    if cached is not None:
+        return cached
+    view = collapse_to_entities(G)
+    G.graph["_entity_view"] = view
+    return view
+
+
+def _resolve_view(group: Optional[str]) -> Optional[nx.Graph]:
+    """The graph a request asked for: addresses, or the actors behind them."""
+    G = _resolve_graph()
+    if G is None:
+        return None
+    return _entity_view(G) if group == "entity" else G
+
+
+def _view_for_id(node_id: str, group: Optional[str]) -> Optional[nx.Graph]:
+    """
+    The graph an id belongs to.
+
+    A synthetic entity id only exists in the collapsed view, so a link to one
+    resolves there whatever mode the caller thinks it is in — that is what lets
+    an entity be opened from a bookmark or a note.
+    """
+    return _resolve_view("entity" if is_entity_node_id(node_id) else group)
+
+
 def _empty_payload(reason: str) -> dict:
     return {
         "nodes": [], "edges": [], "clusters": {},
@@ -138,9 +176,13 @@ def get_graph_data(
                            description="Cap on nodes returned; the renderer stalls well before the upper bound."),
     node_type: Optional[str] = None,
     min_score: float = 0.0,
+    group: Optional[str] = Query(
+        None,
+        description="'entity' collapses co-spending addresses into one node per "
+                    "actor. Anything else returns the address-level graph."),
 ):
     """Get full graph data for visualization."""
-    G = _resolve_graph()
+    G = _resolve_view(group)
     if G is None:
         return _empty_payload(
             "No data ingested yet. Run the pipeline from the Ingest page."
@@ -170,6 +212,8 @@ def get_graph_data(
 
     payload = graph_to_json(G, layout=layout, max_nodes=max_nodes).model_dump()
     payload["ready"] = True
+    payload["grouped"] = "entity" if group == "entity" else "address"
+    payload["entity_summary"] = G.graph.get("entity_summary")
     return payload
 
 
@@ -178,9 +222,10 @@ def get_entity_subgraph(entity_id: str,
                         hops: int = Query(2, ge=1, le=6,
                                           description="Traversal depth. Each hop multiplies the frontier, so this is bounded."),
                         layout: str = "spring",
-                        max_nodes: int = Query(600, ge=1, le=20_000)):
+                        max_nodes: int = Query(600, ge=1, le=20_000),
+                        group: Optional[str] = None):
     """Get N-hop subgraph around a specific entity."""
-    G = _resolve_graph()
+    G = _view_for_id(entity_id, group)
     if G is None:
         return _empty_payload("No data ingested yet.")
     if entity_id not in G:
@@ -190,16 +235,18 @@ def get_entity_subgraph(entity_id: str,
     payload = graph_to_json(sub, layout=layout, max_nodes=max_nodes).model_dump()
     payload["ready"] = True
     payload["focus"] = entity_id
+    payload["grouped"] = "entity" if G.graph.get("grouped") == "entity" else "address"
     return payload
 
 
 @router.get("/neighbors/{entity_id:path}")
-def expand_entity(entity_id: str, limit: int = Query(60, ge=1, le=5_000)):
+def expand_entity(entity_id: str, limit: int = Query(60, ge=1, le=5_000),
+                  group: Optional[str] = None):
     """
     One hop out from a node, as a nodes+edges fragment the client merges into
     the graph it already holds rather than replacing it.
     """
-    G = _resolve_graph()
+    G = _view_for_id(entity_id, group)
     if G is None or entity_id not in G:
         return {"nodes": [], "edges": [], "truncated": False, "total_neighbors": 0}
 
@@ -219,16 +266,17 @@ def expand_entity(entity_id: str, limit: int = Query(60, ge=1, le=5_000)):
         tier = data.get("risk_tier", "Normal")
         score = data.get("anomaly_score") or 0.0
         degree = G.degree(node_id)
+        members = data.get("entity_size") or 1
         nodes.append({
             "id": node_id,
-            "label": _truncate(node_id),
+            "label": _node_label(node_id, data),
             "node_type": node_type,
-            "size": _node_size(node_type, degree, score),
+            "size": _node_size(node_type, degree, score, members),
             "color": RISK_COLORS.get(tier) or NODE_COLORS.get(node_type, "#5C6473"),
             "cluster_id": data.get("cluster_id"),
             "risk_tier": tier if tier != "Normal" else None,
             "anomaly_score": score if score > 0 else None,
-            "metadata": {"degree": degree},
+            "metadata": {"degree": degree, "entity_size": members},
         })
 
     # Through the serializer, so an expanded fragment carries the same
@@ -246,9 +294,10 @@ def expand_entity(entity_id: str, limit: int = Query(60, ge=1, le=5_000)):
 
 
 @router.get("/path")
-def find_path(source: str, target: str, max_hops: int = Query(8, ge=1, le=20)):
+def find_path(source: str, target: str, max_hops: int = Query(8, ge=1, le=20),
+              group: Optional[str] = None):
     """Shortest connection between two entities, with the edge type per hop."""
-    G = _resolve_graph()
+    G = _view_for_id(source, group)
     if G is None:
         return {"found": False, "reason": "No graph loaded."}
     if source not in G:
@@ -296,12 +345,12 @@ def find_path(source: str, target: str, max_hops: int = Query(8, ge=1, le=20)):
 
 
 @router.get("/node/{entity_id:path}")
-def node_detail(entity_id: str):
+def node_detail(entity_id: str, group: Optional[str] = None):
     """
     Full record for one entity: graph position, behavioural features, alerts
     raised against it, and its strongest counterparties.
     """
-    G = _resolve_graph()
+    G = _view_for_id(entity_id, group)
     if G is None:
         return {
             "found": False, "id": entity_id,
@@ -322,6 +371,18 @@ def node_detail(entity_id: str):
     data = dict(G.nodes[entity_id])
     node_type = data.get("node_type", "unknown")
     neighbors = list(G.neighbors(entity_id))
+
+    # Every address this actor is known to control. The node itself carries a
+    # capped sample so the graph payload stays small; the full membership is
+    # what the panel needs, and it comes from the index.
+    entity_members: list[str] = []
+    if node_type == "entity":
+        index = G.graph.get("entities")
+        base = entity_id_from_node(entity_id)
+        entity_members = sorted(
+            index.members.get(base, data.get("members") or [base]) if index
+            else (data.get("members") or [base])
+        )
 
     neighbor_types: dict[str, int] = {}
     for n in neighbors:
@@ -364,6 +425,13 @@ def node_detail(entity_id: str):
         "geo": None,
     }
 
+    if node_type == "entity":
+        detail["entity_size"] = len(entity_members)
+        # Capped at what a panel can show; the count above is the real figure.
+        detail["members"] = entity_members[:500]
+        detail["members_truncated"] = len(entity_members) > 500
+        detail["cospend_witnesses"] = data.get("cospend_witnesses") or []
+
     try:
         with get_db_readonly() as con:
             if node_type == "wallet":
@@ -390,6 +458,42 @@ def node_detail(entity_id: str):
                     detail["risk_tier"] = features.get("risk_tier") or detail["risk_tier"]
                     if features.get("anomaly_score"):
                         detail["anomaly_score"] = features["anomaly_score"]
+
+            elif node_type == "entity" and entity_members:
+                # One actor's behaviour is its addresses' behaviour added up —
+                # except risk, which is the worst of them: an entity is as
+                # compromised as its most compromised address.
+                placeholders = ",".join("?" * len(entity_members))
+                rows = con.execute(f"""
+                    SELECT address, tx_count, total_received, total_sent,
+                           anomaly_score, risk_tier, first_seen, last_seen,
+                           mixer_interaction_count, darknet_proximity_hops
+                    FROM wallet_features WHERE address IN ({placeholders})
+                """, entity_members).fetchall()
+                if rows:
+                    scored = sorted(rows, key=lambda r: -(r[4] or 0.0))
+                    hops = [r[9] for r in rows if r[9] is not None]
+                    detail["features"] = {
+                        "address_count": len(entity_members),
+                        "scored_addresses": len(rows),
+                        "tx_count": sum(r[1] or 0 for r in rows),
+                        "total_received": round(sum(r[2] or 0.0 for r in rows), 8),
+                        "total_sent": round(sum(r[3] or 0.0 for r in rows), 8),
+                        "anomaly_score": scored[0][4],
+                        "risk_tier": scored[0][5],
+                        "worst_address": scored[0][0],
+                        "first_seen": str(min((r[6] for r in rows if r[6]), default="")) or None,
+                        "last_seen": str(max((r[7] for r in rows if r[7]), default="")) or None,
+                        "mixer_interaction_count": sum(r[8] or 0 for r in rows),
+                        "darknet_proximity_hops": min(hops) if hops else None,
+                    }
+                    detail["risk_tier"] = scored[0][5] or detail["risk_tier"]
+                    if scored[0][4]:
+                        detail["anomaly_score"] = scored[0][4]
+                    detail["member_scores"] = [
+                        {"address": r[0], "anomaly_score": r[4], "risk_tier": r[5]}
+                        for r in scored[:25]
+                    ]
 
             elif node_type == "ip":
                 row = con.execute("""
@@ -419,12 +523,17 @@ def node_detail(entity_id: str):
                         "total_output": sum(row[8] or []),
                     }
 
-            alert_rows = con.execute("""
+            # An alert is raised against an address. Opening the actor must
+            # surface what was raised against any of its addresses, or an
+            # entity would read as clean while one of its members is flagged.
+            alert_targets = entity_members if node_type == "entity" else [entity_id]
+            placeholders = ",".join("?" * len(alert_targets))
+            alert_rows = con.execute(f"""
                 SELECT alert_id, risk_tier, confidence, model, description, status,
                        evidence_confidence, evidence_rationale
-                FROM alerts WHERE entity_id = ?
+                FROM alerts WHERE entity_id IN ({placeholders})
                 ORDER BY confidence DESC LIMIT 5
-            """, (entity_id,)).fetchall()
+            """, alert_targets).fetchall()
             detail["alerts"] = [
                 {"alert_id": a[0], "risk_tier": a[1],
                  "risk_score": a[2], "confidence": a[2],
@@ -479,23 +588,51 @@ def list_clusters():
 
 @router.get("/search")
 def search_graph(q: str = "", limit: int = Query(20, ge=1, le=500),
-                 node_type: Optional[str] = None):
+                 node_type: Optional[str] = None,
+                 group: Optional[str] = None):
     """
     Substring search over entity ids, ranked exact -> prefix -> substring,
     then by risk score and degree.
+
+    In the collapsed view an address that belongs to a multi-address actor is
+    no longer a node of its own, so searching for it has to find the actor
+    holding it — otherwise pasting an address from a case file into the find
+    box returns nothing on the very view that was meant to make it findable.
     """
-    G = _resolve_graph()
+    G = _resolve_view(group)
     if not G or not q:
         return []
 
     q_lower = q.lower()
     scored = []
 
+    index = G.graph.get("entities") if group == "entity" else None
+    member_hits: dict[str, str] = {}
+    if index:
+        for address, entity in index.entity_of.items():
+            if q_lower in address.lower() and len(index.members.get(entity, ())) > 1:
+                node = f"entity:{entity}"
+                # First match wins: the list is ranked below, and one row per
+                # actor is what the operator can act on.
+                member_hits.setdefault(node, address)
+
     for node, data in G.nodes(data=True):
         if node_type and data.get("node_type") != node_type:
             continue
         node_lower = node.lower()
-        if q_lower not in node_lower:
+        matched_member = member_hits.pop(node, None)
+        if q_lower not in node_lower and not matched_member:
+            continue
+        if matched_member and q_lower not in node_lower:
+            # Ranked as a substring hit: it matched an address inside the
+            # actor rather than the actor's own name.
+            scored.append((
+                2,
+                -(data.get("anomaly_score") or 0.0),
+                -G.degree(node),
+                node,
+                {**data, "matched_address": matched_member},
+            ))
             continue
 
         if node_lower == q_lower:
@@ -518,10 +655,15 @@ def search_graph(q: str = "", limit: int = Query(20, ge=1, le=500),
     return [
         {
             "id": node,
+            "label": _node_label(node, data),
             "node_type": data.get("node_type", "unknown"),
             "risk_tier": data.get("risk_tier"),
             "anomaly_score": data.get("anomaly_score"),
             "degree": G.degree(node),
+            "entity_size": data.get("entity_size") or 1,
+            # Set when the query matched an address this actor holds rather
+            # than the address it is named after, so the row can say so.
+            "matched_address": data.get("matched_address"),
         }
         for _, _, _, node, data in scored[:limit]
     ]

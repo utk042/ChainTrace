@@ -117,18 +117,18 @@ export const updateAlertStatus = (id, status) => api.put(`/api/alerts/${id}/stat
 
 // ─── Graph ───────────────────────────────────────────────────
 export const getGraphData = (params = {}) => api.get('/api/graph/data', { params });
-export const getSubgraph = (entityId, hops = 2) =>
-  api.get(`/api/graph/subgraph/${encodeURIComponent(entityId)}`, { params: { hops } });
+export const getSubgraph = (entityId, hops = 2, params = {}) =>
+  api.get(`/api/graph/subgraph/${encodeURIComponent(entityId)}`, { params: { hops, ...params } });
 export const getGraphStats = () => api.get('/api/graph/stats');
 export const getClusters = () => api.get('/api/graph/clusters');
 export const searchGraph = (q, params = {}) =>
   api.get('/api/graph/search', { params: { q, ...params } });
-export const getNodeDetail = (entityId) =>
-  api.get(`/api/graph/node/${encodeURIComponent(entityId)}`);
-export const getNeighbors = (entityId, limit = 60) =>
-  api.get(`/api/graph/neighbors/${encodeURIComponent(entityId)}`, { params: { limit } });
-export const findPath = (source, target) =>
-  api.get('/api/graph/path', { params: { source, target } });
+export const getNodeDetail = (entityId, params = {}) =>
+  api.get(`/api/graph/node/${encodeURIComponent(entityId)}`, { params });
+export const getNeighbors = (entityId, limit = 60, params = {}) =>
+  api.get(`/api/graph/neighbors/${encodeURIComponent(entityId)}`, { params: { limit, ...params } });
+export const findPath = (source, target, params = {}) =>
+  api.get('/api/graph/path', { params: { source, target, ...params } });
 
 // ─── Health ──────────────────────────────────────────────────
 export const getHealth = () => api.get('/api/health', { timeout: 15000 });

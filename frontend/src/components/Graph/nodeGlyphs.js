@@ -21,6 +21,9 @@ import { PATHS } from '../Icon';
 
 const GLYPH_FOR_TYPE = {
   wallet: 'wallet',
+  // Several addresses under one hand: the stacked-planes icon, which already
+  // means "a group of these" everywhere else in the interface.
+  entity: 'layers',
   transaction: 'swap',
   ip: 'globe',
   unknown: 'circleDot',

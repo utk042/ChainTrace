@@ -8,78 +8,91 @@ from community import community_louvain
 from app.config import settings
 
 
+def _entity_of(G: nx.Graph, address: str) -> str:
+    """The actor an address belongs to, falling back to the address itself."""
+    data = G.nodes[address] if address in G else {}
+    entity_id = data.get("entity_id")
+    if entity_id:
+        return entity_id
+    index = G.graph.get("entities")
+    return index.entity(address) if index else address
+
+
 def cluster_wallets(G: nx.Graph) -> dict[int, list[str]]:
     """
-    Apply Louvain community detection on the wallet subgraph.
+    Louvain community detection over the *entity* flow graph.
 
-    The wallet subgraph includes:
-    - co_input edges (common-input-ownership heuristic)
-    - wallet_input/wallet_output edges (transaction flow)
+    This used to run over addresses, on a wallet graph whose dominant feature
+    was the co-input cliques: every pair of co-spending addresses carried a
+    weight of 5 from the `co_input` edge plus 3 more for each transaction they
+    shared, and the same cliques were rebuilt here from the transaction
+    structure a second time. So Louvain spent most of its work rediscovering,
+    approximately and at O(N²) cost per transaction, a partition that
+    common-input-ownership already defines exactly (app/graph/entities.py).
+    A 224-input consolidation alone put 24,976 weighted pairs into that graph.
+
+    Contracting each entity to one node first removes the tautology. What is
+    left to find is the thing Louvain is actually good for: which *actors* move
+    value between each other often enough to look like one operation. The
+    communities it returns are then mapped back onto every member address, so
+    `cluster_id` still means the same thing to everything downstream.
 
     Returns: {cluster_id: [wallet_address, ...]}
     """
-    # Extract wallet-only subgraph with co-input edges
     wallet_nodes = [n for n, d in G.nodes(data=True) if d.get("node_type") == "wallet"]
 
     if len(wallet_nodes) < 2:
         return {0: wallet_nodes}
 
-    # Build a weighted wallet graph
+    # address -> entity, and the reverse, computed once.
+    entity_of = {w: _entity_of(G, w) for w in wallet_nodes}
+    members: dict[str, list[str]] = {}
+    for address, entity in entity_of.items():
+        members.setdefault(entity, []).append(address)
+
+    # ── The actor-to-actor flow graph ──────────────────────────────
     W = nx.Graph()
-    W.add_nodes_from(wallet_nodes)
+    W.add_nodes_from(members)
 
-    for u, v, data in G.edges(data=True):
-        edge_type = data.get("edge_type", "")
-        if u in wallet_nodes and v in wallet_nodes:
-            if edge_type == "co_input":
-                # Strong signal: same entity
-                if W.has_edge(u, v):
-                    W[u][v]["weight"] += 5.0
-                else:
-                    W.add_edge(u, v, weight=5.0)
-
-    # Also connect wallets through shared transactions
     for node, node_data in G.nodes(data=True):
-        if node_data.get("node_type") == "transaction":
-            # Get input and output wallets for this TX
-            input_wallets = []
-            output_wallets = []
-            for neighbor in G.neighbors(node):
-                if G.nodes[neighbor].get("node_type") == "wallet":
-                    edge_data = G.edges[neighbor, node] if G.has_edge(neighbor, node) else G.edges[node, neighbor]
-                    et = edge_data.get("edge_type", "")
-                    if et == "wallet_input":
-                        input_wallets.append(neighbor)
-                    elif et == "wallet_output":
-                        output_wallets.append(neighbor)
+        if node_data.get("node_type") != "transaction":
+            continue
 
-            # Connect input wallets to each other (co-spending)
-            for i in range(len(input_wallets)):
-                for j in range(i + 1, len(input_wallets)):
-                    u, v = input_wallets[i], input_wallets[j]
-                    if W.has_edge(u, v):
-                        W[u][v]["weight"] += 3.0
-                    else:
-                        W.add_edge(u, v, weight=3.0)
+        # Every address funding one transaction is the same actor by
+        # construction, so the inputs collapse to a single entity and the
+        # pairwise input-to-input loop this used to run has nothing left to do.
+        senders: set[str] = set()
+        receivers: set[str] = set()
+        for neighbor in G.neighbors(node):
+            if G.nodes[neighbor].get("node_type") != "wallet":
+                continue
+            edge_type = G.edges[neighbor, node].get("edge_type", "")
+            entity = entity_of.get(neighbor) or _entity_of(G, neighbor)
+            # A change address is both, and was previously counted as neither:
+            # the old check tested for 'wallet_input'/'wallet_output' exactly,
+            # so every address that funded a transaction and took change back
+            # dropped out of the clustering signal entirely.
+            if edge_type in ("wallet_input", "wallet_change"):
+                senders.add(entity)
+            if edge_type in ("wallet_output", "wallet_change"):
+                receivers.add(entity)
 
-            # Connect input to output wallets (weaker signal)
-            for iw in input_wallets:
-                for ow in output_wallets:
-                    if iw != ow:
-                        if W.has_edge(iw, ow):
-                            W[iw][ow]["weight"] += 1.0
-                        else:
-                            W.add_edge(iw, ow, weight=1.0)
+        for sender in senders:
+            for receiver in receivers:
+                if sender == receiver:
+                    continue
+                if W.has_edge(sender, receiver):
+                    W[sender][receiver]["weight"] += 1.0
+                else:
+                    W.add_edge(sender, receiver, weight=1.0)
 
-    # Remove isolated nodes (no edges in wallet graph)
+    # Remove isolated entities (no flows in or out of anything else)
     isolated = list(nx.isolates(W))
-
-    # Run Louvain on the connected wallet graph
     connected_W = W.copy()
     connected_W.remove_nodes_from(isolated)
 
     if connected_W.number_of_nodes() < 2:
-        clusters = {0: wallet_nodes}
+        clusters: dict[int, list[str]] = {0: wallet_nodes}
     else:
         partition = community_louvain.best_partition(
             connected_W,
@@ -87,15 +100,17 @@ def cluster_wallets(G: nx.Graph) -> dict[int, list[str]]:
             random_state=42,
         )
 
-        # Group wallets by cluster
-        clusters: dict[int, list[str]] = {}
-        for wallet, cluster_id in partition.items():
-            clusters.setdefault(cluster_id, []).append(wallet)
+        # Back from actors to addresses: every member of an entity inherits the
+        # community that entity landed in.
+        clusters = {}
+        for entity, cluster_id in partition.items():
+            clusters.setdefault(cluster_id, []).extend(members.get(entity, []))
 
-        # Assign isolated wallets to their own clusters
+        # An entity nothing flows to or from is its own cluster — but it is one
+        # cluster for the whole actor, not one per address it holds.
         next_id = max(clusters.keys()) + 1 if clusters else 0
-        for wallet in isolated:
-            clusters[next_id] = [wallet]
+        for entity in isolated:
+            clusters[next_id] = list(members.get(entity, []))
             next_id += 1
 
     # Update the main graph with cluster assignments

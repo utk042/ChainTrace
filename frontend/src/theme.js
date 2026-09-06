@@ -32,6 +32,7 @@ export const ACCENT = '#4c90f0';
 
 export const TYPE_COLORS = {
   wallet: '#4c90f0',       // blue: the primary entity
+  entity: '#2d9d78',       // green: an actor, several addresses under one hand
   transaction: '#8f99a8',  // neutral: connective tissue
   ip: '#7961db',           // violet: the network layer
   unknown: '#5f6b7c',
@@ -86,6 +87,15 @@ export const edgeColor = (edgeType) => EDGE_COLORS[edgeType] || EDGE_COLORS.unkn
 /** Legend rows, in the order the eye should learn them. */
 export const TYPE_LEGEND = [
   { key: 'wallet', label: 'Wallet', color: TYPE_COLORS.wallet },
+  {
+    key: 'entity',
+    label: 'Entity',
+    color: TYPE_COLORS.entity,
+    // Only drawn in the collapsed view, so the legend row and the filter
+    // checkbox for it are hidden in the address view rather than sitting
+    // there permanently reading zero.
+    grouped: true,
+  },
   { key: 'transaction', label: 'Transaction', color: TYPE_COLORS.transaction },
   { key: 'ip', label: 'IP address', color: TYPE_COLORS.ip },
 ];

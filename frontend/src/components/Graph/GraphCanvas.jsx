@@ -5,11 +5,12 @@ import forceAtlas2 from 'graphology-layout-forceatlas2';
 import {
   EdgeArrowProgram, createEdgeArrowProgram, EdgeLineProgram, NodePointProgram,
 } from 'sigma/rendering';
+import Icon from '../Icon';
 import { CANVAS, nodeColor } from '../../theme';
 import { riskVar, fmtInt } from '../../services/format';
 import { NodeTileProgram, NodeDiscProgram } from './nodeRenderer';
 import { glyphFor } from './nodeGlyphs';
-import { orient, isFlow, FLOW_COLORS, describeEdge } from './edgeSemantics';
+import { orient, isFlow, FLOW_COLORS, describeEdge, layerOf } from './edgeSemantics';
 
 /**
  * Slender, sharp directional arrow program.
@@ -198,16 +199,31 @@ function GraphLoader({ graphData, onGraphLoaded, nodeShape }) {
   const loadGraph = useLoadGraph();
   const sigma = useSigma();
 
+  // Held in refs, not read from the closure.
+  //
+  // Rebuilding the graph tears down every node and edge and puts the camera
+  // back to its default, which on screen is a hard flash of the whole canvas.
+  // It must happen when the data changes and at no other time — but these two
+  // props are recreated whenever the page re-renders, and the page re-renders
+  // on every hover, every keystroke in the find box and every poll. With them
+  // in the dependency array the canvas was reloading itself continuously
+  // while data was coming in, which is what the flicker was.
+  const onLoadedRef = useRef(onGraphLoaded);
+  onLoadedRef.current = onGraphLoaded;
+  const shapeRef = useRef(nodeShape);
+  shapeRef.current = nodeShape;
+
   useEffect(() => {
     if (!graphData) return;
     if (!isSigmaAlive(sigma)) return;
+    const nodeShapeNow = shapeRef.current;
 
     const graph = new Graph({ multi: false, type: 'directed' });
 
     (graphData.nodes || []).forEach((node) => {
       if (graph.hasNode(node.id)) return;
       graph.addNode(node.id, {
-        type: nodeShape || 'tile',
+        type: nodeShapeNow || 'tile',
         x: typeof node.x === 'number' ? node.x : Math.random() * 1000 - 500,
         y: typeof node.y === 'number' ? node.y : Math.random() * 1000 - 500,
         size: tileSize(node.size),
@@ -242,11 +258,11 @@ function GraphLoader({ graphData, onGraphLoaded, nodeShape }) {
     } catch (err) {
       console.warn('loadGraph failed:', err);
     }
-    onGraphLoaded?.(graph);
+    onLoadedRef.current?.(graph);
     // Deliberately not keyed on nodeShape: reloading the graph to change a
     // shape would throw away the camera and any expansion on the canvas. A
     // shape change is applied in place by ShapeSwitcher below.
-  }, [graphData, loadGraph, sigma, onGraphLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [graphData, loadGraph, sigma]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return null;
 }
@@ -310,6 +326,9 @@ function Reducers({
   hoveredEdge, onDensityChange, graphData,
 }) {
   const sigma = useSigma();
+  // Reported out of the effect, never a reason to re-run it.
+  const onDensityRef = useRef(onDensityChange);
+  onDensityRef.current = onDensityChange;
 
   const focusNode = hovered || selected;
 
@@ -318,7 +337,10 @@ function Reducers({
     const graph = sigma.getGraph();
     if (!graph.hasNode(focusNode)) return null;
     return new Set([focusNode, ...graph.neighbors(focusNode)]);
-  }, [focusNode, sigma, searchMatches]);
+    // Keyed on graphData, not on searchMatches: this reads the loaded graph's
+    // adjacency, so it goes stale when a new graph is loaded and not when a
+    // search finds different nodes in the one already on screen.
+  }, [focusNode, sigma, graphData]);
 
   // The two nodes a hovered edge joins, so hovering a link reads the same way
   // hovering a node does.
@@ -334,6 +356,7 @@ function Reducers({
     if (!isSigmaAlive(sigma)) return;
 
     const typeFilter = filters?.types;
+    const layerFilter = filters?.layers;
     const minScore = filters?.minScore || 0;
     const hasPath = pathNodes && pathNodes.size > 0;
 
@@ -351,12 +374,20 @@ function Reducers({
       return true;
     };
 
+    /** A link layer the operator has switched off in the filter panel. */
+    const layerHidden = (data) => Boolean(layerFilter)
+      && layerFilter[layerOf(data.edge_type)] === false;
+
     // Counted here in one pass, not tallied inside the reducer: Sigma runs
     // the reducer once per render layer, so a counter incremented in it
     // reported several times the number of edges that exist.
     let withheld = 0;
     if (overBudget) {
       graph.forEachEdge((edge, data, source, target) => {
+        // A link the operator has already hidden is not being withheld from
+        // them, and counting it as such would inflate the notice into
+        // claiming the canvas is holding back their own filter.
+        if (layerHidden(data)) return;
         if (withhold(edge, data, source, target)) withheld += 1;
       });
     }
@@ -432,6 +463,12 @@ function Reducers({
     sigma.setSetting('edgeReducer', (edge, data) => {
       const res = { ...data };
       const [source, target] = graph.extremities(edge);
+
+      // Switched off in the filter panel.
+      if (layerHidden(data)) {
+        res.hidden = true;
+        return res;
+      }
 
       // An inferred link on a graph too dense to draw. Kept for a selection's
       // own neighbourhood and for a hovered edge, which is where the
@@ -512,7 +549,7 @@ function Reducers({
       }
     }
 
-    onDensityChange?.(overBudget ? { withheld, total: graph.size } : null);
+    onDensityRef.current?.(overBudget ? { withheld, total: graph.size } : null);
     // `graphData` is a dependency because the reducers read the loaded graph's
     // size to decide whether it is over budget. Without it the effect never
     // re-ran after the graph arrived, so the edge count it judged was the one
@@ -520,7 +557,7 @@ function Reducers({
     // appeared on the graphs that needed it.
   }, [
     sigma, hovered, selected, filters, pathEdges, pathNodes, searchMatches,
-    neighborSet, focusNode, edgeEnds, hoveredEdge, onDensityChange, graphData,
+    neighborSet, focusNode, edgeEnds, hoveredEdge, graphData,
   ]);
 
   return null;
@@ -881,6 +918,11 @@ export default function GraphCanvas({
   const [tooltip, setTooltip] = useState(null);
   const [edgeHover, setEdgeHover] = useState(null);
   const [density, setDensity] = useState(null);
+  // The notice has been read and put away. Reset when a different graph is
+  // loaded, because the next one withholds a different number of links and
+  // that is a fact about the new view, not the dismissed one.
+  const [densityDismissed, setDensityDismissed] = useState(false);
+  useEffect(() => { setDensityDismissed(false); }, [graphData]);
 
   const handleEdgeHover = useCallback((info) => setEdgeHover(info), []);
   const handleDensity = useCallback((info) => {
@@ -921,13 +963,24 @@ export default function GraphCanvas({
         />
       </SigmaContainer>
 
-      {density && (
+      {density && !densityDismissed && (
         <div className="graph-density-note" role="status">
           <span className="graph-density-dot" />
-          Showing {fmtInt(density.total - density.withheld)} of {fmtInt(density.total)} links.
-          Co-input and IP relationships are held back at this density — select
-          a node to see its own, or isolate a smaller neighbourhood. Payments
-          are never hidden.
+          <span className="graph-density-text">
+            Showing {fmtInt(density.total - density.withheld)} of {fmtInt(density.total)} links.
+            Co-input and IP relationships are held back at this density — select
+            a node to see its own, or isolate a smaller neighbourhood. Payments
+            are never hidden.
+          </span>
+          <button
+            type="button"
+            className="icon-btn graph-density-close"
+            onClick={() => setDensityDismissed(true)}
+            title="Dismiss — the drawn and held-back counts stay in the Summary panel"
+            aria-label="Dismiss the density notice"
+          >
+            <Icon name="close" size={12} />
+          </button>
         </div>
       )}
 

@@ -20,9 +20,16 @@ import { getNotes, createNote, deleteNote } from '../../services/api';
 
 const TYPE_LABEL = {
   wallet: 'Wallet',
+  entity: 'Entity',
   ip: 'IP address',
   transaction: 'Transaction',
 };
+
+/** Strip the synthetic prefix a collapsed actor is addressed by. */
+const ENTITY_PREFIX = 'entity:';
+const baseAddress = (id) => (
+  typeof id === 'string' && id.startsWith(ENTITY_PREFIX) ? id.slice(ENTITY_PREFIX.length) : id
+);
 
 function Row({ label, value, mono = false }) {
   return (
@@ -216,8 +223,12 @@ export default function NodeInspector({
     <div className="inspector">
       <div className="detail-head">
         <div className="detail-head-main">
-          <span className="detail-head-title">{shortId(id, 16, 12)}</span>
-          <span className="detail-head-sub">{TYPE_LABEL[type] || type}</span>
+          <span className="detail-head-title">{shortId(baseAddress(id), 16, 12)}</span>
+          <span className="detail-head-sub">
+            {type === 'entity' && detail.entity_size
+              ? `Entity · ${fmtInt(detail.entity_size)} addresses`
+              : TYPE_LABEL[type] || type}
+          </span>
           <div className="detail-badges">
             {detail.risk_tier && (
               <span className={`badge ${detail.risk_tier.toLowerCase()}`}>{detail.risk_tier}</span>
@@ -233,9 +244,13 @@ export default function NodeInspector({
         </button>
       </div>
 
+      {/* The address, not the internal handle. An "entity:" id is this
+          process's way of naming a group; pasted into a block explorer, a
+          case file or a warrant it is meaningless, so it is never shown and
+          never copied. */}
       <div className="id-block">
-        <code>{id}</code>
-        <CopyButton value={id} title="Copy full identifier" />
+        <code>{baseAddress(id)}</code>
+        <CopyButton value={baseAddress(id)} title="Copy full identifier" />
       </div>
 
       {score > 0 && (
@@ -326,6 +341,82 @@ export default function NodeInspector({
             ))}
           </div>
         </Collapse>
+
+        {type === 'entity' && (
+          <>
+            <Collapse title="Behaviour" count={detail.entity_size}>
+              <div className="prop-list">
+                <Row label="Addresses held" value={fmtInt(detail.entity_size)} />
+                <Row label="Transactions" value={fmtInt(features.tx_count)} />
+                <Row label="Received" value={fmtBtc(features.total_received)} />
+                <Row label="Sent" value={fmtBtc(features.total_sent)} />
+                <Row label="First seen" mono value={fmtTimestamp(features.first_seen)} />
+                <Row label="Last seen" mono value={fmtTimestamp(features.last_seen)} />
+                {features.worst_address && (
+                  <Row label="Most anomalous" mono value={shortId(features.worst_address, 10, 8)} />
+                )}
+              </div>
+            </Collapse>
+
+            {/* The evidence for the grouping, named. Common-input-ownership is
+                a heuristic, and an investigator has to be able to go and read
+                the transactions it rests on rather than take it on trust. */}
+            {detail.cospend_witnesses?.length > 0 && (
+              <Collapse title="Grouped by" count={detail.cospend_witnesses.length}>
+                <div className="prop-list">
+                  {detail.cospend_witnesses.map((txid) => (
+                    <button
+                      key={txid}
+                      type="button"
+                      className="link-row"
+                      onClick={() => onSelectNode(txid)}
+                      title={txid}
+                    >
+                      <span className="legend-dot transaction" />
+                      <code>{shortId(txid, 10, 6)}</code>
+                      <span className="link-row-meta">spent these addresses together</span>
+                    </button>
+                  ))}
+                </div>
+              </Collapse>
+            )}
+
+            <Collapse
+              title="Member addresses"
+              count={detail.entity_size}
+              defaultOpen={false}
+            >
+              <div className="prop-list">
+                {(detail.member_scores?.length
+                  ? detail.member_scores
+                  : (detail.members || []).map((address) => ({ address }))
+                ).map((m) => (
+                  <button
+                    key={m.address}
+                    type="button"
+                    className="link-row"
+                    onClick={() => onSelectNode(m.address)}
+                    title={m.address}
+                  >
+                    <span className="legend-dot wallet" />
+                    <code>{shortId(m.address, 10, 6)}</code>
+                    <span className="link-row-meta">
+                      {m.anomaly_score != null
+                        ? `score ${Number(m.anomaly_score).toFixed(0)}${m.risk_tier ? ` · ${m.risk_tier}` : ''}`
+                        : 'member address'}
+                    </span>
+                  </button>
+                ))}
+                {detail.members_truncated && (
+                  <span className="muted">
+                    Showing the first {fmtInt((detail.members || []).length)} of{' '}
+                    {fmtInt(detail.entity_size)}.
+                  </span>
+                )}
+              </div>
+            </Collapse>
+          </>
+        )}
 
         {type === 'wallet' && detail.features && (
           <>

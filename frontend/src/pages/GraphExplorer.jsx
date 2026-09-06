@@ -16,7 +16,7 @@ import { useSession } from '../state/SessionProvider';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { TYPE_LEGEND, RISK_LEGEND, RISK_COLORS, TYPE_COLORS } from '../theme';
 import { shortId, fmtInt } from '../services/format';
-import { NODE_SHAPES } from '../components/Graph/edgeSemantics';
+import { NODE_SHAPES, LINK_LAYERS, ALL_LAYERS, layerOf } from '../components/Graph/edgeSemantics';
 import { saveUrl, saveBlob, fileStamp } from '../services/download';
 import {
   getGraphData, getSubgraph, searchGraph,
@@ -31,7 +31,29 @@ const LAYOUTS = [
   { key: 'circular', label: 'Circular' },
 ];
 
-const DEFAULT_TYPES = { wallet: true, transaction: true, ip: true };
+const DEFAULT_TYPES = { wallet: true, entity: true, transaction: true, ip: true };
+
+/**
+ * How the canvas is grouped.
+ *
+ * Addresses is the literal chain. Entities applies common-input-ownership:
+ * every address that ever funded a transaction alongside another is the same
+ * actor, so they are drawn as one node. On a real dataset that is the
+ * difference between a mat of several thousand addresses and a few hundred
+ * actors you can actually follow.
+ */
+/**
+ * A collapsed actor's id, which only exists in the entity view.
+ *
+ * Kept in step with ENTITY_PREFIX in backend/app/graph/builder.py.
+ */
+const ENTITY_PREFIX = 'entity:';
+const isEntityId = (id) => typeof id === 'string' && id.startsWith(ENTITY_PREFIX);
+
+const GROUPINGS = [
+  { key: 'address', label: 'Addresses' },
+  { key: 'entity', label: 'Entities' },
+];
 
 /**
  * Link analysis over the entity graph, laid out as the Gotham Graph
@@ -65,6 +87,9 @@ export default function GraphExplorer() {
   const [searchMatches, setSearchMatches] = useState(new Set());
 
   const [types, setTypes] = useState(DEFAULT_TYPES);
+  const [layers, setLayers] = useState(ALL_LAYERS);
+  // 'address' | 'entity' — which graph the backend is asked for.
+  const [grouping, setGrouping] = useState('address');
   const [minScore, setMinScore] = useState(0);
   const [layout, setLayout] = useState('spring');
   // Which node program draws the canvas. A view of a few hundred reads best
@@ -100,7 +125,18 @@ export default function GraphExplorer() {
     initial: 300, min: 250, max: 520, edge: 'right',
   });
 
-  const filters = useMemo(() => ({ types, minScore }), [types, minScore]);
+  const filters = useMemo(() => ({ types, layers, minScore }), [types, layers, minScore]);
+
+  // Read through a ref so every graph call can name the current view without
+  // becoming a dependency of the callbacks that make them — `selectNode` and
+  // friends are deliberately stable, because rebuilding them reloads the
+  // canvas and throws away the camera.
+  const groupingRef = useRef(grouping);
+  groupingRef.current = grouping;
+  const groupParam = useCallback(
+    (g = groupingRef.current) => (g === 'entity' ? { group: 'entity' } : {}),
+    [],
+  );
 
   const pathNodes = useMemo(
     () => new Set(pathResult?.found ? pathResult.path.map((p) => p.id) : []),
@@ -117,6 +153,22 @@ export default function GraphExplorer() {
     return pairs;
   }, [pathResult]);
 
+  // Whether the loading overlay is actually painted.
+  //
+  // A full-bleed panel over the canvas for the length of one fast request
+  // reads as a flash, and the graph reloads often: a re-layout, an isolate, an
+  // exit from isolation, a reset. So it appears at once only when there is no
+  // graph to hide — the first load — and otherwise waits a quarter of a second
+  // and comes up translucent, leaving the previous graph visible underneath.
+  const hasGraph = Boolean(graphData?.nodes?.length);
+  const [overlayShown, setOverlayShown] = useState(false);
+  useEffect(() => {
+    if (!loading) { setOverlayShown(false); return undefined; }
+    if (!hasGraph) { setOverlayShown(true); return undefined; }
+    const timer = setTimeout(() => setOverlayShown(true), 250);
+    return () => clearTimeout(timer);
+  }, [loading, hasGraph]);
+
   const flash = useCallback((message) => {
     setToast(message);
     setTimeout(() => setToast(null), 2600);
@@ -128,7 +180,11 @@ export default function GraphExplorer() {
     setError(null);
     setEmptyReason(null);
     try {
-      const res = await getGraphData({ layout: opts.layout || layout, max_nodes: 1500 });
+      const res = await getGraphData({
+        layout: opts.layout || layout,
+        max_nodes: 1500,
+        ...(groupParam(opts.grouping ?? groupingRef.current)),
+      });
       const data = res.data || {};
       setGraphData(data);
       if (!data.nodes?.length) setEmptyReason(data.reason || 'The graph is empty.');
@@ -145,6 +201,36 @@ export default function GraphExplorer() {
   }, [layout]);
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Switch between the address graph and the actors behind it.
+   *
+   * Node ids differ between the two views — a collapsed actor has a synthetic
+   * id — so anything holding one has to be let go of: a selection, a traced
+   * path and an isolation all refer to nodes the other view does not have.
+   * The alternative is a panel describing an entity that is no longer drawn.
+   */
+  const handleGrouping = useCallback(async (next) => {
+    if (next === groupingRef.current) return;
+    groupingRef.current = next;
+    setGrouping(next);
+    setIsolatedNode(null);
+    setPathResult(null);
+    setPathSource(null);
+    setPathQuery('');
+    setSelected(null);
+    setDetail(null);
+    setSideTab('summary');
+    setSearchMatches(new Set());
+    setResults([]);
+    lastHandledQueryRef.current = null;
+    await load({ grouping: next });
+    control.current.fit?.();
+    flash(next === 'entity'
+      ? 'Grouped into entities — co-spending addresses are drawn as one actor.'
+      : 'Showing individual addresses.');
+  }, [load, flash]);
+
 
   // Clusters are a separate, optional read: the panel says so when the
   // backend has not computed any rather than showing an empty group.
@@ -175,7 +261,7 @@ export default function GraphExplorer() {
       }, 450);
     }
     try {
-      const res = await getNodeDetail(nodeId);
+      const res = await getNodeDetail(nodeId, groupParam());
       if (res.data?.found) setDetail(res.data);
       // Keep the backend's reason. Collapsing every outcome to a bare
       // `found: false` is what turned "the graph you are looking at is older
@@ -219,6 +305,16 @@ export default function GraphExplorer() {
     if (loading || !graphData) return;
 
     if (lastHandledQueryRef.current === q && selected === q) return;
+
+    // An entity handle names a node that only exists in the collapsed view.
+    // Handed one — from a note, a bookmark, or global search — the page has to
+    // be in that view before it can show it, or it would isolate an entity
+    // onto a canvas whose legend, filters and counts all describe addresses.
+    if (isEntityId(q) && groupingRef.current !== 'entity') {
+      handleGrouping('entity');
+      return;
+    }
+
     lastHandledQueryRef.current = q;
 
     setQuery(q);
@@ -231,7 +327,7 @@ export default function GraphExplorer() {
     } else {
       handleIsolate(q, 2);
     }
-  }, [searchParams, loading, graphData, selected, selectNode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams, loading, graphData, selected, selectNode, handleGrouping]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (query.trim().length < 2) {
@@ -242,7 +338,7 @@ export default function GraphExplorer() {
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const res = await searchGraph(query.trim(), { limit: 12 });
+        const res = await searchGraph(query.trim(), { limit: 12, ...groupParam() });
         if (cancelled) return;
         const rows = res.data || [];
         setResults(rows);
@@ -259,7 +355,7 @@ export default function GraphExplorer() {
     if (!nodeId) return;
     setExpanding(true);
     try {
-      const res = await getNeighbors(nodeId, 60);
+      const res = await getNeighbors(nodeId, 60, groupParam());
       const added = control.current.addFragment?.(res.data, nodeId) || 0;
       setLiveStats(control.current.getStats?.());
       flash(added > 0
@@ -275,7 +371,7 @@ export default function GraphExplorer() {
   const handleIsolate = useCallback(async (nodeId, hops = 2) => {
     setLoading(true);
     try {
-      const res = await getSubgraph(nodeId, hops);
+      const res = await getSubgraph(nodeId, hops, groupParam());
       if (!res.data?.nodes?.length) {
         // The router says why — not in the graph, nothing ingested, filtered
         // out. Dropping that for a generic line is what sent operators
@@ -339,7 +435,7 @@ export default function GraphExplorer() {
     if (!pathSource || !pathQuery.trim()) return;
     setPathBusy(true);
     try {
-      const res = await findPath(pathSource, pathQuery.trim());
+      const res = await findPath(pathSource, pathQuery.trim(), groupParam());
       setPathResult(res.data);
       if (!res.data?.found) flash(res.data?.reason || 'No path found.');
     } catch {
@@ -443,15 +539,31 @@ export default function GraphExplorer() {
       const tier = n.risk_tier || 'Normal';
       byTier.set(tier, (byTier.get(tier) || 0) + 1);
     });
-    return { visible, byType, byTier };
+    // Links counted by the layer they belong to, so each checkbox says how
+    // much of the canvas it governs before it is unticked.
+    const byLayer = new Map();
+    (graphData?.edges || []).forEach((e) => {
+      const key = layerOf(e.edge_type);
+      byLayer.set(key, (byLayer.get(key) || 0) + 1);
+    });
+    return { visible, byType, byTier, byLayer };
   }, [graphData, types, minScore]);
 
   const stats = graphData?.stats || {};
   const shownNodes = liveStats?.nodes ?? stats.total_nodes ?? 0;
   const shownEdges = liveStats?.edges ?? stats.total_edges ?? 0;
-  const activeFilters = Object.values(types).filter(Boolean).length < 3 || minScore > 0;
+  // The entity row only means something in the collapsed view; in the address
+  // view it would sit there permanently reading zero.
+  const visibleTypes = useMemo(
+    () => NODE_TYPES.filter((t) => !t.grouped || grouping === 'entity'),
+    [grouping],
+  );
 
-  const typeMax = Math.max(...NODE_TYPES.map((t) => drawn.byType.get(t.key) || 0), 1);
+  const activeFilters = visibleTypes.some((t) => types[t.key] === false)
+    || LINK_LAYERS.some((l) => layers[l.key] === false)
+    || minScore > 0;
+
+  const typeMax = Math.max(...visibleTypes.map((t) => drawn.byType.get(t.key) || 0), 1);
   const tierRows = ['Critical', 'High', 'Elevated', 'Low', 'Normal']
     .filter((t) => drawn.byTier.has(t))
     .map((t) => ({ tier: t, count: drawn.byTier.get(t) }));
@@ -479,6 +591,14 @@ export default function GraphExplorer() {
         <div className="tool-group">
           <span className="tool-group-label">Organise</span>
           <div className="tool-group-items">
+            <Select
+              className="tool-select"
+              value={grouping}
+              onChange={handleGrouping}
+              title="Draw one node per address, or one per actor — addresses spent together are the same actor"
+              ariaLabel="Grouping"
+              options={GROUPINGS.map((g) => ({ value: g.key, label: g.label }))}
+            />
             <Select
               className="tool-select"
               value={layout}
@@ -710,8 +830,8 @@ export default function GraphExplorer() {
         </div>
 
         {/* Overlay, never a branch that unmounts the canvas. */}
-        {loading && (
-          <div className="graph-overlay">
+        {overlayShown && (
+          <div className={`graph-overlay${hasGraph ? ' graph-overlay-soft' : ''}`}>
             <div className="spinner" />
             <span>Building entity graph…</span>
           </div>
@@ -746,7 +866,8 @@ export default function GraphExplorer() {
             </header>
             <div className="graph-float-body">
               <div className="col">
-                {NODE_TYPES.map((t) => (
+                <span className="field-label">Node types</span>
+                {visibleTypes.map((t) => (
                   <label key={t.key} className="check">
                     <input
                       type="checkbox"
@@ -757,6 +878,26 @@ export default function GraphExplorer() {
                     <span>{t.label}</span>
                     <span className="muted mono" style={{ marginLeft: 'auto' }}>
                       {fmtInt(drawn.byType.get(t.key) || 0)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              {/* Which relationships are drawn. Payments are the evidence;
+                  the rest is context, and being able to switch it off is what
+                  makes a dense graph readable without hiding a payment. */}
+              <div className="col">
+                <span className="field-label">Link types</span>
+                {LINK_LAYERS.map((l) => (
+                  <label key={l.key} className="check" title={l.hint}>
+                    <input
+                      type="checkbox"
+                      checked={layers[l.key] !== false}
+                      onChange={() => setLayers((p) => ({ ...p, [l.key]: p[l.key] === false }))}
+                    />
+                    <span>{l.label}</span>
+                    <span className="muted mono" style={{ marginLeft: 'auto' }}>
+                      {fmtInt(drawn.byLayer.get(l.key) || 0)}
                     </span>
                   </label>
                 ))}
@@ -777,7 +918,7 @@ export default function GraphExplorer() {
 
               <button
                 className="btn btn-block"
-                onClick={() => { setTypes(DEFAULT_TYPES); setMinScore(0); }}
+                onClick={() => { setTypes(DEFAULT_TYPES); setLayers(ALL_LAYERS); setMinScore(0); }}
                 disabled={!activeFilters}
               >
                 Clear filters
@@ -851,7 +992,7 @@ export default function GraphExplorer() {
         {/* Canvas furniture */}
         <div className="graph-footer">
           <div className="graph-legend">
-            {NODE_TYPES.map((t) => (
+            {visibleTypes.map((t) => (
               <span key={t.key} className="legend-item">
                 <i className="legend-dot" style={{ background: t.color }} />{t.label}
               </span>
@@ -927,7 +1068,7 @@ export default function GraphExplorer() {
           {sideTab === 'summary' && (
             <div className="browser-scroll">
               <HistogramGroup title="Object types" total={fmtInt(drawn.visible.length)}>
-                {NODE_TYPES.map((t) => (
+                {visibleTypes.map((t) => (
                   <HistogramRow
                     key={t.key}
                     label={t.label}

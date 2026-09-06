@@ -27,6 +27,45 @@ export const FLOW_TYPES = new Set(['wallet_input', 'wallet_output']);
 export const isFlow = (edgeType) => FLOW_TYPES.has(edgeType);
 
 /**
+ * The layers a link can belong to, as the filter panel offers them.
+ *
+ * Payments are evidence; the rest is context the pipeline inferred or
+ * observed. Being able to switch the context off is what lets an investigator
+ * see the money on a graph that has any density to it at all.
+ */
+export const LINK_LAYERS = [
+  {
+    key: 'payment',
+    label: 'Payments',
+    hint: 'Value moving into and out of transactions. The evidence.',
+    types: ['wallet_input', 'wallet_output', 'wallet_change'],
+  },
+  {
+    key: 'network',
+    label: 'IP observations',
+    hint: 'An address was seen carrying a transaction. An observation, not a payment.',
+    types: ['ip_observed_tx'],
+  },
+  {
+    key: 'inference',
+    label: 'Co-spend links',
+    hint: 'Kept for graphs built before co-spending became an entity of its own.',
+    types: ['co_input'],
+  },
+];
+
+const LAYER_OF_TYPE = new Map(
+  LINK_LAYERS.flatMap((layer) => layer.types.map((t) => [t, layer.key])),
+);
+
+/** Which filter layer an edge type belongs to. Unknown types read as payments
+ *  rather than vanishing: a link nobody has classified is still a link. */
+export const layerOf = (edgeType) => LAYER_OF_TYPE.get(edgeType) || 'payment';
+
+/** Every layer on, which is what an unfiltered graph means. */
+export const ALL_LAYERS = Object.fromEntries(LINK_LAYERS.map((l) => [l.key, true]));
+
+/**
  * Money leaving a wallet is read differently from money arriving, so they do
  * not share a colour. Inferences stay muted: they are context, not evidence
  * of a payment.
@@ -74,6 +113,10 @@ export function describeEdge(edgeType, { fromEntity = false } = {}) {
       return fromEntity ? 'received from this transaction' : 'transaction paid out to wallet';
     case 'co_input':
       return 'spent together in one transaction (co-input heuristic — an inference, not a payment)';
+    case 'wallet_change':
+      return fromEntity
+        ? 'funded this transaction and took change back from it'
+        : 'wallet funded the transaction and received change';
     case 'ip_observed_tx':
       return 'this address was observed carrying the transaction';
     default:

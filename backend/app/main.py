@@ -37,6 +37,10 @@ API_REVISION = 3
 PROCESS_ID = os.getpid()
 STARTED_AT = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+# The last table counts /api/health managed to read. Served back verbatim while
+# an ingest run holds the database, so the poll never has to queue behind it.
+_LAST_COUNTS = {"transactions": 0, "wallets": 0, "alerts": 0}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -184,20 +188,40 @@ def health():
     then showed "no data ingested, go and ingest some" over a database that
     was full, and every page that got its read in anyway rendered results
     that contradicted the banner. Whatever goes wrong here is now named.
+
+    It also reports whether an ingest run is in flight, so the app can hold
+    its data views back instead of rendering a table that is mid-rewrite.
     """
     from app.ml.autoencoder import backend_name, backend_reason, is_light_mode
     from app.ml.trainer import get_entity_graph
+    from app.routers.ingest import pipeline_snapshot
 
-    counts = {"transactions": 0, "wallets": 0, "alerts": 0}
+    ingest_state = pipeline_snapshot()
+    ingesting = ingest_state.get("status") == "running"
+
+    counts = dict(_LAST_COUNTS)
     db_error = None
-    try:
-        with get_db() as con:
-            counts["transactions"] = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
-            counts["wallets"] = con.execute("SELECT COUNT(*) FROM wallet_features").fetchone()[0]
-            counts["alerts"] = con.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
-    except Exception as exc:
-        db_error = str(exc)
-        logger.exception("Health check could not read the database")
+
+    # No database read while a run holds it.
+    #
+    # An ingest run clears every table and rewrites it, and the ML stage after
+    # that saturates the process. A COUNT(*) issued into the middle of that
+    # queues behind the writer, so the health poll — which the frontend gives
+    # fifteen seconds before it declares the backend gone — was timing out and
+    # painting "BACKEND OFFLINE" across a backend that was merely busy doing
+    # exactly what it had been asked to do. The counters are served from the
+    # last read instead, and flagged as such; the tables are mid-rewrite, so a
+    # fresh count would not describe a dataset that exists anyway.
+    if not ingesting:
+        try:
+            with get_db() as con:
+                counts["transactions"] = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+                counts["wallets"] = con.execute("SELECT COUNT(*) FROM wallet_features").fetchone()[0]
+                counts["alerts"] = con.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
+            _LAST_COUNTS.update(counts)
+        except Exception as exc:
+            db_error = str(exc)
+            logger.exception("Health check could not read the database")
 
     graph = get_entity_graph()
 
@@ -222,6 +246,12 @@ def health():
         "transaction_count": counts["transactions"],
         "wallet_count": counts["wallets"],
         "alert_count": counts["alerts"],
+        # True while a run is rewriting the tables: the three counters above
+        # are then the last ones read, not the current ones, and the app holds
+        # its data views back rather than drawing half a dataset.
+        "ingesting": ingesting,
+        "counts_stale": ingesting,
+        "ingest": ingest_state,
         # In-memory analysis state. When this disagrees with the table counts
         # the graph on screen is not backed by the current database, which is
         # what made clicking a node return nothing at all.
