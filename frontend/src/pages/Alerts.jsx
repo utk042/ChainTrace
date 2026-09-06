@@ -8,7 +8,7 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useCommands } from '../services/commands';
 import { useIsNarrow } from '../hooks/useMediaQuery';
 import {
-  shortId, fmtInt, fmtPct, fmtTimestamp, toCsv, riskVar,
+  shortId, fmtInt, fmtScore, fmtTimestamp, toCsv, riskVar,
 } from '../services/format';
 import Icon from '../components/Icon';
 import BrowserView from '../components/Layout/BrowserView';
@@ -40,7 +40,8 @@ const ENTITY_TYPES = [
 
 const CSV_COLUMNS = [
   ['alert_id', 'Alert ID'], ['entity_id', 'Entity ID'], ['entity_type', 'Entity type'],
-  ['risk_tier', 'Risk tier'], ['confidence', 'Confidence'], ['model', 'Model'],
+  ['risk_tier', 'Risk tier'], ['confidence', 'Risk score (0-100)'],
+  ['evidence_confidence', 'Evidence confidence'], ['model', 'Model'],
   ['status', 'Status'], ['description', 'Description'], ['timestamp', 'Timestamp'],
 ];
 
@@ -48,7 +49,10 @@ const COLUMNS = [
   { key: 'risk_tier', label: 'Risk', sortable: true, width: 84 },
   { key: 'entity_id', label: 'Entity', sortable: true },
   { key: 'model', label: 'Model', sortable: false, width: 130 },
-  { key: 'confidence', label: 'Conf.', sortable: true, width: 66, align: 'right' },
+  // "Score", never "Conf." — the column holds an anomaly distance, and a
+  // heading that says confidence turns a ranking into an accusation.
+  { key: 'confidence', label: 'Score', sortable: true, width: 74, align: 'right' },
+  { key: 'evidence_confidence', label: 'Evidence', sortable: false, width: 92 },
   { key: 'description', label: 'Finding', sortable: false },
   { key: 'status', label: 'Status', sortable: false, width: 104 },
   { key: 'timestamp', label: 'Raised', sortable: true, width: 152 },
@@ -67,6 +71,32 @@ const EMPTY_FILTERS = {
  * says is filtered actually is filtered server-side, rather than the list
  * being trimmed after the fact and the total left describing something else.
  */
+
+/**
+ * How well supported a finding is — a different question from how anomalous
+ * it is, and the one that decides whether a lead is worth a day's work.
+ *
+ * Rendered next to the score everywhere the score appears, because on its own
+ * a 95 says only "unlike the others" and reads like certainty.
+ */
+function EvidenceBadge({ level, compact = false }) {
+  if (!level) {
+    return compact
+      ? <span className="badge muted" title="This alert predates evidence grading.">—</span>
+      : null;
+  }
+  const title = {
+    HIGH: 'More than one independent check points the same way, and at least one is a pattern you can verify by hand against the transactions.',
+    MEDIUM: 'Something checkable supports this, but nothing independent corroborates it.',
+    LOW: 'An unusual-behaviour flag with nothing independent behind it. A place to start looking, not a finding.',
+  }[level];
+  return (
+    <span className={`badge evidence-${level.toLowerCase()}`} title={title}>
+      {compact ? level : `Evidence ${level}`}
+    </span>
+  );
+}
+
 export default function Alerts() {
   const navigate = useNavigate();
   const { openTab } = useSession();
@@ -473,7 +503,7 @@ export default function Alerts() {
 
             <div className="filter-block">
               <div className="filter-block-title">
-                Minimum confidence
+                Minimum risk score
                 {filters.min_confidence > 0 && (
                   <button className="reset" onClick={() => update({ min_confidence: 0 })}>clear</button>
                 )}
@@ -483,9 +513,12 @@ export default function Alerts() {
                   type="range" min="0" max="100" step="5"
                   value={filters.min_confidence}
                   onChange={(e) => update({ min_confidence: Number(e.target.value) })}
-                  aria-label="Minimum confidence"
+                  aria-label="Minimum risk score"
                 />
-                <span className="slider-value">{filters.min_confidence}%</span>
+                {/* The filter runs on the score column, which is a 0-100
+                    ranking. Showing it as a percentage was the last place in
+                    this panel that implied a probability. */}
+                <span className="slider-value">{fmtScore(filters.min_confidence, 0)}</span>
               </div>
             </div>
 
@@ -613,7 +646,10 @@ export default function Alerts() {
                         <td className="mono" title={alert.entity_id}>{shortId(alert.entity_id, 10, 6)}</td>
                         <td title={alert.model}>{alert.model}</td>
                         <td className="num" style={{ color: riskVar(alert.risk_tier) }}>
-                          {fmtPct(alert.confidence)}
+                          {fmtScore(alert.risk_score ?? alert.confidence, 0)}
+                        </td>
+                        <td>
+                          <EvidenceBadge level={alert.evidence_confidence} compact />
                         </td>
                         <td className="wrap" title={alert.description}>{alert.description}</td>
                         <td>{alert.status}</td>
@@ -685,7 +721,8 @@ function AlertDetail({
           </span>
           <div className="detail-badges">
             <span className={`badge ${alert.risk_tier?.toLowerCase()}`}>{alert.risk_tier}</span>
-            <span className="badge info">{fmtPct(alert.confidence)} confidence</span>
+            <span className="badge">Risk {fmtScore(alert.risk_score ?? alert.confidence)}</span>
+            <EvidenceBadge level={alert.evidence_confidence} />
             <span className="badge">{alert.status}</span>
           </div>
         </div>
@@ -728,6 +765,52 @@ function AlertDetail({
                 {alert.description || 'The model recorded no description for this finding.'}
               </p>
             </div>
+
+            <Collapse title="Assessment" icon="shieldCheck" defaultOpen>
+              <div className="assessment">
+                <div className="assessment-row">
+                  <span className="assessment-label">Risk score</span>
+                  <span className="assessment-value mono" style={{ color: riskVar(alert.risk_tier) }}>
+                    {fmtScore(alert.risk_score ?? alert.confidence)}
+                  </span>
+                </div>
+                <div className="assessment-row">
+                  <span className="assessment-label">Evidence confidence</span>
+                  <span className="assessment-value">
+                    <EvidenceBadge level={alert.evidence_confidence} compact />
+                  </span>
+                </div>
+                {/* The two are different questions and the panel has to say
+                    so where the numbers are, not in documentation nobody
+                    opens. A high score on one statistical detector is a
+                    weaker lead than a middling one with three checks behind
+                    it, and the figures alone imply the opposite. */}
+                <p className="assessment-caveat">
+                  {alert.score_caveat
+                    || `${fmtScore(alert.risk_score ?? alert.confidence)} is how far this entity's `
+                       + 'behaviour sits from the typical wallet in this dataset. It ranks '
+                       + 'wallets for review; it is not a probability that any offence occurred.'}
+                </p>
+                {alert.evidence_rationale && (
+                  <p className="assessment-caveat">{alert.evidence_rationale}</p>
+                )}
+              </div>
+
+              {alert.evidence_factors?.length > 0 && (
+                <div className="evidence-list">
+                  <div className="section-label">What this rests on</div>
+                  {alert.evidence_factors.map((f) => (
+                    <div className={`evidence-factor kind-${f.kind || 'other'}`} key={`${f.factor}-${f.value}`}>
+                      <div className="evidence-factor-head">
+                        <span className="evidence-factor-name">{f.factor}</span>
+                        <span className="evidence-factor-value mono">{f.value}</span>
+                      </div>
+                      {f.note && <p className="evidence-factor-note">{f.note}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Collapse>
 
             <Collapse title="Disposition" defaultOpen>
               <div className="chip-row" style={{ padding: '0 var(--space-md)' }}>
@@ -807,7 +890,8 @@ function AlertDetail({
               ['Entity id', alert.entity_id],
               ['Entity type', alert.entity_type],
               ['Risk tier', alert.risk_tier],
-              ['Confidence', fmtPct(alert.confidence)],
+              ['Risk score', fmtScore(alert.risk_score ?? alert.confidence)],
+              ['Evidence confidence', alert.evidence_confidence || 'not assessed'],
               ['Model', alert.model],
               ['Status', alert.status],
               ['Raised', fmtTimestamp(alert.timestamp)],

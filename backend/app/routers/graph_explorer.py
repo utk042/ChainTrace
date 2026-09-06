@@ -420,13 +420,16 @@ def node_detail(entity_id: str):
                     }
 
             alert_rows = con.execute("""
-                SELECT alert_id, risk_tier, confidence, model, description, status
+                SELECT alert_id, risk_tier, confidence, model, description, status,
+                       evidence_confidence, evidence_rationale
                 FROM alerts WHERE entity_id = ?
                 ORDER BY confidence DESC LIMIT 5
             """, (entity_id,)).fetchall()
             detail["alerts"] = [
-                {"alert_id": a[0], "risk_tier": a[1], "confidence": a[2],
-                 "model": a[3], "description": a[4], "status": a[5]}
+                {"alert_id": a[0], "risk_tier": a[1],
+                 "risk_score": a[2], "confidence": a[2],
+                 "model": a[3], "description": a[4], "status": a[5],
+                 "evidence_confidence": a[6], "evidence_rationale": a[7]}
                 for a in alert_rows
             ]
     except Exception as exc:

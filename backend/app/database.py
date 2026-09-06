@@ -97,9 +97,22 @@ def _init_schema(con: duckdb.DuckDBPyConnection) -> None:
             geo_country_src   VARCHAR,
             geo_country_dst   VARCHAR,
             asn_src           VARCHAR,
-            asn_dst           VARCHAR
+            asn_dst           VARCHAR,
+            -- As supplied with the record, kept apart from the GeoIP-inferred
+            -- pair above. An operator's own attribution is evidence; a
+            -- lookup's is inference, and a forensic record must not blur them.
+            geo_country       VARCHAR,
+            asn               VARCHAR
         );
     """)
+
+    # Migration-safe, for databases written before the supplied-attribution
+    # columns existed.
+    for col, decl in [
+        ("geo_country", "VARCHAR"),
+        ("asn", "VARCHAR"),
+    ]:
+        con.execute(f"ALTER TABLE transactions ADD COLUMN IF NOT EXISTS {col} {decl};")
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS wallet_features (
@@ -155,6 +168,12 @@ def _init_schema(con: duckdb.DuckDBPyConnection) -> None:
             entity_id     VARCHAR,
             entity_type   VARCHAR,
             risk_tier     VARCHAR,
+            -- The anomaly score, 0-100. Named `confidence` since the first
+            -- schema, which is how it came to be printed as "95.0%
+            -- confidence" — a ranking presented as a probability of guilt.
+            -- The column keeps its name so existing databases still read;
+            -- everything above it now calls this what it is, a risk score,
+            -- and evidence confidence is the separate column below.
             confidence    DOUBLE,
             model         VARCHAR,
             description   TEXT,
@@ -163,6 +182,15 @@ def _init_schema(con: duckdb.DuckDBPyConnection) -> None:
             status        VARCHAR DEFAULT 'pending'
         );
     """)
+
+    # How well supported the finding is, as against how anomalous it is.
+    # See app/ml/confidence.py.
+    for col, decl in [
+        ("evidence_confidence", "VARCHAR"),
+        ("evidence_rationale", "TEXT"),
+        ("evidence_factors", "JSON"),
+    ]:
+        con.execute(f"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS {col} {decl};")
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS ip_metadata (

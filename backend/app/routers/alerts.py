@@ -7,11 +7,24 @@ import json
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from app.database import get_db_readonly, get_db
+from app.ml.confidence import score_caveat
 from typing import Optional
 import csv
 import io
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
+
+
+def _json_or_empty(value):
+    """A JSON column that may be a string, already parsed, or absent."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
 
 
 @router.get("")
@@ -67,7 +80,8 @@ def list_alerts(
         offset = (page - 1) * page_size
         rows = con.execute(f"""
             SELECT alert_id, entity_id, entity_type, risk_tier,
-                   confidence, model, description, shap_values, timestamp, status
+                   confidence, model, description, shap_values, timestamp, status,
+                   evidence_confidence, evidence_rationale, evidence_factors
             FROM alerts
             WHERE {where}
             ORDER BY {sort_by} {order}
@@ -88,12 +102,18 @@ def list_alerts(
                 "entity_id": r[1],
                 "entity_type": r[2],
                 "risk_tier": r[3],
+                # The same number under both names: `risk_score` says what it
+                # is, `confidence` is kept so an older client still reads.
+                "risk_score": r[4],
                 "confidence": r[4],
                 "model": r[5],
                 "description": r[6],
                 "shap_values": shap_vals,
                 "timestamp": str(r[8]),
                 "status": r[9],
+                "evidence_confidence": r[10],
+                "evidence_rationale": r[11],
+                "evidence_factors": _json_or_empty(r[12]),
             })
 
         return {
@@ -110,15 +130,22 @@ def export_alerts_csv():
     with get_db_readonly() as con:
         rows = con.execute("""
             SELECT alert_id, entity_id, entity_type, risk_tier,
-                   confidence, model, description, timestamp, status
+                   confidence, evidence_confidence, evidence_rationale,
+                   model, description, timestamp, status
             FROM alerts
             ORDER BY confidence DESC
         """).fetchall()
 
     output = io.StringIO()
     writer = csv.writer(output)
+    # "Risk Score (0-100)", not "Confidence". This file is what gets attached
+    # to a report and read by someone who never saw the interface, and a
+    # column headed "Confidence" containing 95 will be read as 95% certainty
+    # of wrongdoing by everyone who opens it.
     writer.writerow(["Alert ID", "Entity ID", "Type", "Risk Tier",
-                     "Confidence", "Model", "Description", "Timestamp", "Status"])
+                     "Risk Score (0-100)", "Evidence Confidence",
+                     "Evidence Rationale", "Model", "Description",
+                     "Timestamp", "Status"])
     for r in rows:
         writer.writerow(r)
 
@@ -136,7 +163,8 @@ def get_alert_detail(alert_id: str):
     with get_db_readonly() as con:
         row = con.execute("""
             SELECT alert_id, entity_id, entity_type, risk_tier,
-                   confidence, model, description, shap_values, timestamp, status
+                   confidence, model, description, shap_values, timestamp, status,
+                   evidence_confidence, evidence_rationale, evidence_factors
             FROM alerts WHERE alert_id = ?
         """, [alert_id]).fetchone()
 
@@ -155,12 +183,19 @@ def get_alert_detail(alert_id: str):
             "entity_id": row[1],
             "entity_type": row[2],
             "risk_tier": row[3],
+            "risk_score": row[4],
             "confidence": row[4],
             "model": row[5],
             "description": row[6],
             "shap_values": shap_vals,
             "timestamp": str(row[8]),
             "status": row[9],
+            "evidence_confidence": row[10],
+            "evidence_rationale": row[11],
+            "evidence_factors": _json_or_empty(row[12]),
+            # Sent with the number so no client has to compose this sentence
+            # itself, and none of them can word it differently.
+            "score_caveat": score_caveat(float(row[4] or 0)),
         }
 
 

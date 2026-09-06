@@ -4,7 +4,7 @@ Schema definitions for ingested Bitcoin transaction records.
 """
 
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
 
 
@@ -28,7 +28,21 @@ class TransactionRecord(BaseModel):
     fee: float = Field(default=0.0, ge=0, description="Transaction fee (BTC)")
     script_type: str = Field(default="P2PKH", description="Script type (P2PKH, P2SH, P2WPKH, etc.)")
 
-    # Enriched fields (added after ingestion)
+    # Attribution as supplied with the record.
+    #
+    # The required input schema carries one country and one ASN per
+    # transaction, not a source/destination pair. These are the operator's own
+    # values and are never overwritten: they are evidence supplied with the
+    # capture, whereas geo_country_src and the rest are inferred from a GeoIP
+    # database, and a forensic record has to keep the two apart. Until these
+    # existed the two columns were accepted by the parser, ignored by this
+    # model, and lost without a word — the ingest reported no errors while
+    # dropping them.
+    geo_country: Optional[str] = Field(default=None, description="Country supplied with the record")
+    asn: Optional[str] = Field(default=None, description="ASN supplied with the record")
+
+    # Resolved per endpoint: the supplied value when there is one, otherwise
+    # whatever GeoIP could infer (see ingestion/enricher.py).
     geo_country_src: Optional[str] = Field(default=None, description="Source IP country code")
     geo_country_dst: Optional[str] = Field(default=None, description="Destination IP country code")
     asn_src: Optional[str] = Field(default=None, description="Source IP ASN")
@@ -36,6 +50,23 @@ class TransactionRecord(BaseModel):
 
     # Hidden ground-truth label for validation (not exposed in API)
     _label: Optional[str] = None
+
+    @model_validator(mode="after")
+    def seed_endpoint_attribution(self):
+        """
+        A single supplied country/ASN describes the observed source endpoint.
+
+        The record has one of each and two endpoints, so something has to say
+        which it belongs to. It is the source: a flow record's attribution
+        annotates where the traffic was seen coming from. Only the source is
+        filled, and only when it is empty — the destination is left for GeoIP
+        to infer rather than assumed to match.
+        """
+        if self.geo_country and not self.geo_country_src:
+            self.geo_country_src = self.geo_country
+        if self.asn and not self.asn_src:
+            self.asn_src = self.asn
+        return self
 
     @field_validator("txid")
     @classmethod
@@ -79,6 +110,8 @@ class TransactionResponse(BaseModel):
     output_amounts: list[float]
     fee: float
     script_type: str
+    geo_country: Optional[str] = None
+    asn: Optional[str] = None
     geo_country_src: Optional[str] = None
     geo_country_dst: Optional[str] = None
     asn_src: Optional[str] = None
