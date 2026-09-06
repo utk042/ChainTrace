@@ -1054,7 +1054,7 @@ export default function GraphExplorer() {
 
       {/* ── Side panel ──────────────────────────────────────────── */}
       {showSide && (
-        <aside className="graph-side" style={{ position: 'relative' }}>
+        <aside className="graph-side">
           <div {...splitterProps} className={`${splitterProps.className} splitter-edge`} />
           <Tabs
             active={sideTab}

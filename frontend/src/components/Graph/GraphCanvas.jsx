@@ -736,6 +736,35 @@ function NodeInteractions({
   return null;
 }
 
+/**
+ * Where a floating tooltip may be drawn so it stays inside the viewport.
+ *
+ * The old form — `Math.min(innerWidth - 270, x + 14)` — assumed a viewport
+ * wider than the tooltip. On a phone it resolves to a left edge that is
+ * already past what the tooltip needs, so the box hangs off the right of
+ * the screen with the identifier it exists to show cut in half. Clamping
+ * against the width the tooltip can actually take, and flipping to the
+ * other side of the cursor when there is no room, keeps it on screen at
+ * every width.
+ */
+function tooltipPosition(x, y, { width = 320, height = 170 } = {}) {
+  const margin = 8;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const w = Math.min(width, vw - margin * 2);
+  const h = Math.min(height, vh - margin * 2);
+
+  let left = x + 14;
+  if (left + w > vw - margin) left = x - 14 - w;      // flip to the left of the cursor
+  left = Math.max(margin, Math.min(left, vw - w - margin));
+
+  let top = y + 14;
+  if (top + h > vh - margin) top = y - 14 - h;        // flip above the cursor
+  top = Math.max(margin, Math.min(top, vh - h - margin));
+
+  return { left, top, maxWidth: w };
+}
+
 /** Exposes camera and layout operations to the page through a ref. */
 function Controller({ controlRef, onLayoutRunning }) {
   const sigma = useSigma();
@@ -987,11 +1016,7 @@ export default function GraphCanvas({
       {edgeHover && (
         <div
           className="graph-tooltip"
-          style={{
-            position: 'fixed',
-            left: Math.min(window.innerWidth - 280, edgeHover.x + 14),
-            top: Math.min(window.innerHeight - 150, edgeHover.y + 14),
-          }}
+          style={{ position: 'fixed', ...tooltipPosition(edgeHover.x, edgeHover.y, { height: 150 }) }}
         >
           <div className="graph-tooltip-header">
             <span className="graph-tooltip-type">
@@ -1023,11 +1048,7 @@ export default function GraphCanvas({
       {tooltip && (
         <div
           className="graph-tooltip"
-          style={{
-            position: 'fixed',
-            left: Math.min(window.innerWidth - 270, tooltip.x + 14),
-            top: Math.min(window.innerHeight - 170, tooltip.y + 14),
-          }}
+          style={{ position: 'fixed', ...tooltipPosition(tooltip.x, tooltip.y) }}
         >
           <div className="graph-tooltip-header">
             <span className={`graph-tooltip-type ${tooltip.attrs.node_type || ''}`}>

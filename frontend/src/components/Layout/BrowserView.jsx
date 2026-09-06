@@ -32,7 +32,7 @@ export default function BrowserView({
   return (
     <div
       className={`browser${detail ? ' has-detail' : ''}${showFilters ? ' show-filters' : ''}`}
-      style={{ position: 'relative', '--pane-detail': `${width}px` }}
+      style={{ '--pane-detail': `${width}px` }}
     >
       <aside className="browser-pane browser-filters" aria-label={filtersTitle}>
         <div className="browser-pane-head">
@@ -57,7 +57,7 @@ export default function BrowserView({
       <section className="browser-pane browser-results">{results}</section>
 
       {detail && (
-        <aside className="browser-pane browser-detail" style={{ position: 'relative' }}>
+        <aside className="browser-pane browser-detail">
           <div {...splitterProps} className={`${splitterProps.className} splitter-edge`} />
           {detail}
         </aside>

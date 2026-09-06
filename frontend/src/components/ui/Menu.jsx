@@ -99,7 +99,7 @@ export default function Menu({ trigger, align = 'left', children, className = ''
 
   return (
     <>
-      <span ref={anchorRef} style={{ display: 'inline-flex', minWidth: 0 }}>
+      <span ref={anchorRef} className="menu-anchor">
         {trigger({ open, toggle: () => setOpen((v) => !v), close })}
       </span>
       {open && createPortal(
