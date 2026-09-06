@@ -239,13 +239,14 @@ export default function Dashboard() {
         </Menu>
       </div>
 
+      {/* The column widths come from .browser in the stylesheet, driven by
+          --pane-detail. Setting grid-template-columns inline here pinned the
+          summary to its dragged width at every window size — an inline
+          declaration is unanswerable by a media query, so on a phone the
+          pane ran off the side of the screen. */}
       <div
         className={`browser${showSummary ? ' has-detail' : ''}`}
-        style={{
-          position: 'relative',
-          gridTemplateColumns: showSummary ? `minmax(0, 1fr) ${sideWidth}px` : 'minmax(0, 1fr)',
-          '--pane-detail': `${sideWidth}px`,
-        }}
+        style={{ '--pane-detail': `${sideWidth}px` }}
       >
         <section className="browser-pane">
           <div className="browser-scroll" style={{ padding: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
@@ -404,7 +405,7 @@ export default function Dashboard() {
         </section>
 
         {showSummary && (
-          <aside className="browser-pane" style={{ position: 'relative' }}>
+          <aside className="browser-pane browser-detail">
             <div {...splitterProps} className={`${splitterProps.className} splitter-edge`} />
             <div className="browser-pane-head">
               <Icon name="barChart" size={12} />

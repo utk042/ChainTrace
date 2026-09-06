@@ -275,6 +275,13 @@ code, pre, .mono { font-family: var(--font-mono); }
   height: 100%;
   overflow: hidden;
   background: var(--bg-app);
+  /* The document asks for viewport-fit=cover, so the shell owes the notch
+     and the home indicator their own clearance — otherwise the title bar
+     sits under the cutout and the status bar under the gesture bar. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 .gt-body {
@@ -457,7 +464,22 @@ code, pre, .mono { font-family: var(--font-mono); }
   min-width: 0;
 }
 
-.menubar-menus { display: flex; align-items: center; gap: 1px; flex-shrink: 0; }
+/* Scrolls rather than shoves. Both this and .menubar-right refused to
+   shrink, which put the clock, the provenance chip and the reload button
+   several hundred pixels off the right edge of a phone screen. */
+.menubar-menus {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.menubar-menus::-webkit-scrollbar { display: none; }
 
 .menubar-trigger {
   padding: 3px var(--space-md);
@@ -506,6 +528,10 @@ code, pre, .mono { font-family: var(--font-mono); }
   gap: var(--space-sm);
   flex-shrink: 0;
   margin-left: auto;
+  /* Whatever else gives, the reload button and the provenance chip stay
+     reachable — they are the two controls that say what is on screen and
+     let an operator refresh it. */
+  padding-left: var(--space-sm);
 }
 
 /* Classification-style marking. Real deployments put the handling caveat
@@ -563,11 +589,29 @@ code, pre, .mono { font-family: var(--font-mono); }
 
 .rail::-webkit-scrollbar { display: none; }
 
-.rail:hover {
-  width: 175px;
-  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.65), 1px 0 0 var(--border);
-  background: var(--bg-chrome);
-  transition-delay: 0.12s;
+/* Only where hovering is a real, revocable state. A tap on a touch screen
+   latches :hover, which left the expanded rail covering the workspace with
+   nothing to hover away to. */
+@media (hover: hover) and (pointer: fine) {
+  .rail:hover {
+    width: 175px;
+    box-shadow: 6px 0 24px rgba(0, 0, 0, 0.65), 1px 0 0 var(--border);
+    background: var(--bg-chrome);
+    transition-delay: 0.12s;
+  }
+
+  .rail:hover .rail-item-label {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .rail:hover .rail-badge-corner { display: none; }
+
+  .rail:hover .rail-item-badge {
+    display: inline-flex;
+    align-items: center;
+  }
 }
 
 .rail-spacer { flex: 1; }
@@ -635,12 +679,6 @@ code, pre, .mono { font-family: var(--font-mono); }
   flex: 1;
 }
 
-.rail:hover .rail-item-label {
-  opacity: 1;
-  transform: translateX(0);
-  pointer-events: auto;
-}
-
 .rail-badge-corner {
   position: absolute;
   top: -4px;
@@ -658,10 +696,6 @@ code, pre, .mono { font-family: var(--font-mono); }
   font-weight: 600;
 }
 
-.rail:hover .rail-badge-corner {
-  display: none;
-}
-
 .rail-item-badge {
   display: none;
   margin-left: auto;
@@ -673,11 +707,6 @@ code, pre, .mono { font-family: var(--font-mono); }
   font-size: 10px;
   line-height: 14px;
   font-weight: 600;
-}
-
-.rail:hover .rail-item-badge {
-  display: inline-flex;
-  align-items: center;
 }
 
 /* ─── Status bar ────────────────────────────────────────────────── */
@@ -735,6 +764,16 @@ code, pre, .mono { font-family: var(--font-mono); }
 }
 
 /* ═══ Menus and popovers ════════════════════════════════════════ */
+
+/* The wrapper Menu puts around its trigger so it has something to measure.
+   It lives here rather than as an inline style because a breakpoint has to
+   be able to hide or reflow the trigger it holds, and an inline declaration
+   outranks every stylesheet selector however specific. */
+.menu-anchor {
+  display: inline-flex;
+  min-width: 0;
+  flex-shrink: 0;
+}
 
 .menu-surface {
   position: absolute;
@@ -827,6 +866,10 @@ code, pre, .mono { font-family: var(--font-mono); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Both the title and the note beside it truncate, so a narrow header used
+     to read "Activi… scored by PCA autoenco…" — two half-sentences and no
+     answer to which panel this is. The title now shrinks last. */
+  flex: 0 1 auto;
 }
 
 .panel-title svg { color: var(--text-tertiary); flex-shrink: 0; }
@@ -838,6 +881,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  flex: 0 100 auto;   /* gives way long before the title does */
 }
 
 .panel-header-actions {
@@ -1051,6 +1095,10 @@ code, pre, .mono { font-family: var(--font-mono); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* A flex item's floor is its content width unless told otherwise, and a
+     trigger that refuses to shrink paints its label straight over its
+     neighbour's. */
+  min-width: 0;
 }
 
 .select-trigger > svg { flex-shrink: 0; color: var(--text-tertiary); }
@@ -1510,6 +1558,11 @@ kbd {
   height: 100%;
   gap: 1px;
   background: var(--border);
+  /* The anchor for the filter and detail panes once they become overlays.
+     Declared here rather than as an inline style, so the breakpoints below
+     can promote those panes to `position: absolute` — an inline rule wins
+     against any stylesheet selector, however specific. */
+  position: relative;
 }
 
 .browser:not(.show-filters) {
@@ -1536,6 +1589,10 @@ kbd {
   background: var(--bg-panel);
   overflow: hidden;
 }
+
+/* Positioned so the splitter pinned to its leading edge has something to
+   sit against — and so a breakpoint can override it. */
+.browser-detail { position: relative; }
 
 .browser-pane-head {
   display: flex;
@@ -1874,7 +1931,9 @@ kbd {
   color: var(--text-tertiary);
 }
 
-.page-toolbar-spacer { flex: 1; min-width: var(--space-sm); }
+/* In a wrapping toolbar the spacer must be allowed to collapse to nothing,
+   or it claims a whole row of its own on a narrow window. */
+.page-toolbar-spacer { flex: 1 1 0; min-width: 0; }
 
 .toolbar-sep {
   width: 1px;
@@ -1891,6 +1950,10 @@ kbd {
   padding: 0 var(--space-sm);
   border-right: 1px solid var(--border-soft);
   min-width: 0;
+  /* Never squeezed. The toolbar that holds these scrolls sideways, so a
+     group that shrank would be trading a scroll — which the operator can
+     resolve — for controls drawn on top of each other, which they cannot. */
+  flex: 0 0 auto;
 }
 
 .tool-group:last-child { border-right: none; }
@@ -2188,6 +2251,10 @@ button.stat-tile:hover { background: var(--bg-well); }
   min-width: 0;
   gap: 1px;
   background: var(--border);
+  /* The anchor for the side panel once it becomes an overlay. Without it
+     the panel resolved against the workspace and, with no "side" area left
+     in the narrow grid, was auto-placed into a new row beneath the canvas. */
+  position: relative;
 }
 
 .graph-page.no-side {
@@ -2209,6 +2276,9 @@ button.stat-tile:hover { background: var(--bg-well); }
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
+  /* A sideways flick on the toolbar must not also drag the page behind it. */
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .graph-stage {
@@ -2256,6 +2326,7 @@ button.stat-tile:hover { background: var(--bg-well); }
   min-height: 0;
   background: var(--bg-panel);
   overflow: hidden;
+  position: relative;   /* for the splitter on its leading edge */
 }
 
 /* Container for top-floating widgets over the canvas (search & isolation banner). */
@@ -3318,76 +3389,6 @@ button.stat-tile:hover { background: var(--bg-well); }
   }
 }
 
-/* ═══ Responsive ════════════════════════════════════════════════
-   The rail and the chrome rows are fixed at every width. What adapts is
-   pane count: the three-pane browser sheds its filter column, then its
-   detail column becomes an overlay. Nothing is ever allowed to clip
-   silently. */
-
-@media (max-width: 1240px) {
-  .browser.has-detail { grid-template-columns: 200px minmax(240px, 1fr) 340px; }
-}
-
-@media (max-width: 1080px) {
-  .browser { grid-template-columns: minmax(0, 1fr); }
-  .browser.has-detail { grid-template-columns: minmax(0, 1fr) 320px; }
-  /* The filter pane folds into a disclosure above the results. */
-  .browser .browser-filters { display: none; }
-  .browser.show-filters .browser-filters {
-    display: flex;
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: 250px;
-    z-index: var(--z-panel);
-    box-shadow: var(--shadow-lg);
-  }
-  .graph-page { grid-template-columns: minmax(0, 1fr) 260px; }
-}
-
-@media (max-width: 860px) {
-  .browser.has-detail { grid-template-columns: minmax(0, 1fr); }
-  .browser.has-detail .browser-detail {
-    position: absolute;
-    inset: 0;
-    z-index: var(--z-panel);
-    box-shadow: var(--shadow-lg);
-  }
-  .titlebar-search { display: none; }
-  .menubar-doc { justify-content: flex-start; }
-  /* Only the name survives; the transaction count is on the status bar. */
-  .menubar-doc .menubar-doc-meta { display: none; }
-  .graph-page {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "toolbar" "stage";
-  }
-  .graph-side {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: min(320px, 88vw);
-    border-left: 1px solid var(--border);
-    box-shadow: var(--shadow-lg);
-    z-index: var(--z-panel);
-  }
-  .tool-group-label { display: none; }
-  .tool-btn span { display: none; }
-  .graph-legend { display: none; }
-}
-
-@media (max-width: 640px) {
-  .menubar-menus .menubar-trigger:nth-child(n+4) { display: none; }
-  .statusbar-group:nth-child(n+3) { display: none; }
-  .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .settings-nav { flex-direction: row; overflow-x: auto; padding: 0; }
-  .settings-nav-item { border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; }
-  .settings-nav-item.active { border-left-color: transparent; border-bottom-color: var(--accent); }
-  .stat-strip { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
-  .graph-find { width: calc(100% - var(--space-xl)); }
-}
-
 /* ═══ Interactivity & Layout Additions ══════════════════════════ */
 
 .menubar-clock {
@@ -3485,7 +3486,10 @@ button.stat-tile:hover { background: var(--bg-well); }
   font-size: var(--text-sm);
   color: var(--text-primary);
   min-width: 0;
-  max-width: calc(100% - 320px);
+  /* `calc(100% - 320px)` goes negative below a 320px stage and resolves to
+     zero, which collapsed the banner to a sliver of border. Reserve room
+     for the find box only while there is room to reserve. */
+  max-width: max(140px, calc(100% - 320px));
   white-space: nowrap;
   flex-shrink: 1;
 }
@@ -3576,4 +3580,235 @@ button.stat-tile:hover { background: var(--bg-well); }
   flex-wrap: wrap;
   justify-content: center;
   font-size: var(--text-xs);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Everything below is a width- or input-conditional override, so it is the
+   last thing in the file. A media query adds no specificity of its own: a
+   base rule declared after one simply wins, which is how the menu bar clock
+   and the graph tooltip kept their desktop widths on a phone.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ═══ Responsive ════════════════════════════════════════════════
+   The rail and the chrome rows are fixed at every width. What adapts is
+   pane count: the three-pane browser sheds its filter column, then its
+   detail column becomes an overlay. Below that the chrome sheds the
+   readings duplicated elsewhere, and every toolbar that can no longer fit
+   its controls scrolls sideways rather than stacking them on top of each
+   other. Nothing is ever allowed to clip silently. */
+
+@media (max-width: 1240px) {
+  .browser.has-detail { grid-template-columns: 200px minmax(240px, 1fr) 340px; }
+}
+
+@media (max-width: 1080px) {
+  .browser { grid-template-columns: minmax(0, 1fr); }
+  .browser.has-detail { grid-template-columns: minmax(0, 1fr) 320px; }
+  /* The filter pane folds into a disclosure above the results. */
+  .browser .browser-filters { display: none; }
+  .browser.show-filters .browser-filters {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 250px;
+    z-index: var(--z-panel);
+    box-shadow: var(--shadow-lg);
+  }
+  .graph-page { grid-template-columns: minmax(0, 1fr) 260px; }
+}
+
+@media (max-width: 860px) {
+  /* Two panes no longer fit side by side: the detail pane covers the
+     results instead. Its own close button is how it goes away.
+
+     `!important` here answers the `!important` on the wide-window rules
+     above — those exist to beat the inline `--pane-detail` width, and
+     without a matching flag the narrow layout would lose to them and the
+     detail pane would run several hundred pixels off the right edge. */
+  .browser.has-detail,
+  .browser:not(.show-filters).has-detail {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .browser.has-detail .browser-detail {
+    position: absolute;
+    inset: 0;
+    z-index: var(--z-panel);
+    box-shadow: var(--shadow-lg);
+  }
+  /* A column that no longer exists cannot be resized, and a 1px drag target
+     over a full-width pane is a scroll the operator did not ask for. */
+  .browser.has-detail .browser-detail .splitter,
+  .graph-side .splitter { display: none; }
+
+  .titlebar-search { display: none; }
+  .menubar-doc { justify-content: flex-start; }
+  /* Only the name survives; the transaction count is on the status bar. */
+  .menubar-doc .menubar-doc-meta { display: none; }
+
+  .graph-page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "toolbar" "stage";
+  }
+  /* The panel is placed into the *stage* cell rather than taken out of
+     flow. Two grid items may share one area, so it overlays the canvas and
+     nothing else — an absolutely positioned panel anchored to the page
+     covered the toolbar too, and with it the button that closes the panel. */
+  .graph-side {
+    grid-area: stage;
+    justify-self: end;
+    width: min(320px, 88vw);
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+    z-index: var(--z-panel);
+  }
+  .tool-group-label { display: none; }
+  /* Only buttons that carry an icon may drop their caption. The timeline
+     interval buttons are captions and nothing else — hiding those left
+     three blank squares where Day / Week / Month had been. */
+  .tool-btn > svg ~ span { display: none; }
+  .graph-legend { display: none; }
+}
+
+@media (max-width: 640px) {
+  /* The old rule here hid every menu past the third. It never fired —
+     components/ui/Menu wraps each trigger in a span, so
+     `.menubar-trigger:nth-child(n+4)` matched nothing and all six menus
+     stayed, shoving the clock and the reload button off screen. Rather than
+     repair the rule, the bar now scrolls (see .menubar-menus): hiding the
+     menus took away Investigate and Help, which is where several commands
+     live that have no other route on a phone.
+
+     The status bar is the opposite case — its counters are readings, each
+     one repeated on the page it describes, so dropping them costs nothing. */
+  .statusbar-group:nth-child(n+3) { display: none; }
+
+  .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .settings-nav { flex-direction: row; overflow-x: auto; padding: 0; }
+  .settings-nav-item {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    /* As a row these shrank to "Forensic …", "Seed …", "Offlin…", "S…" —
+       four sections a reader cannot tell apart. They keep their width and
+       the strip scrolls instead. */
+    flex: 0 0 auto;
+  }
+  .settings-nav-item.active { border-left-color: transparent; border-bottom-color: var(--accent); }
+
+  .stat-strip { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+
+  /* The find box shares the top of the stage with the isolation banner, so
+     it takes a share of the width rather than all of it. */
+  .graph-find { width: min(300px, 100%); }
+  .graph-stage-top { gap: var(--space-sm); flex-wrap: wrap; }
+
+  /* Room for the graph's own canvas furniture is scarce; the zoom cluster
+     and the node count stop competing for the same corner. */
+  .graph-footer { right: 52px; }
+}
+
+/* ─── Phones ──────────────────────────────────────────────────────
+   Below this the chrome carries only what cannot be read anywhere else.
+   Everything dropped here is duplicated in the status bar, in a menu, or
+   in the panel the control opens. */
+
+@media (max-width: 520px) {
+  /* The menu bar's clock repeats the status bar's, to the second. */
+  .menubar-clock { display: none; }
+
+  /* Tighter, but the transaction count stays: it is the one number that
+     says whether a dataset is loaded at all, and at 360px it still fits
+     beside the connection state and the clock. */
+  .statusbar { gap: var(--space-sm); padding: 0 var(--space-sm); }
+  .statusbar-group + .statusbar-group { padding-left: var(--space-sm); }
+
+  .page-toolbar { gap: var(--space-xs); padding: var(--space-xs) var(--space-sm); }
+  .page-toolbar-title { font-size: var(--text-base); }
+
+  /* Two tiles across is the last width at which a KPI figure is still
+     legible; below that they stack. */
+  .stat-strip { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+  .two-col { grid-template-columns: minmax(0, 1fr); }
+
+  /* The detail pane is the whole window here, so its header may use it. */
+  .prop-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .prop-label { font-size: var(--text-xs); }
+
+  /* A three-column bar chart row has no room for a 70px track and a value
+     column beside a label on a phone. */
+  .shap-row { grid-template-columns: minmax(0, 1fr) 52px 40px; }
+
+  .modal-backdrop { padding: var(--space-sm); }
+  .menu-surface { max-width: calc(100vw - 16px); }
+  .graph-tooltip { max-width: calc(100vw - 16px); }
+
+  /* The float panels over the canvas take the width they are given. */
+  .graph-float { width: calc(100% - var(--space-xl)); }
+  .graph-side { width: min(340px, 92vw); }
+
+  /* The node count and the legend both sat left of the zoom cluster; on a
+     phone the count gets the row to itself. */
+  .graph-footer { right: 48px; gap: var(--space-sm); }
+  .graph-count { font-size: 10px; }
+
+  .pagination { gap: var(--space-xs); }
+  .pagination .page-info { font-size: 10px; }
+
+  .ingest-gate-card { padding: var(--space-lg); }
+  .page-scroll { padding: var(--space-sm) var(--space-sm) var(--space-lg); }
+}
+
+@media (max-width: 400px) {
+  /* At this width the tabs are the navigation — the rail icons are 38px of
+     a 360px screen, and the workspace needs the rest. */
+  .ws-tab { max-width: 150px; }
+  .provenance-chip { display: none; }
+  .toolbar-sep { display: none; }
+
+  /* The status bar keeps the two readings that exist nowhere else on a
+     phone: whether the backend is answering, and the UTC clock the whole
+     tool timestamps against. The dataset counters go — every data view
+     prints its own count in its toolbar — because at 320px the clock was
+     otherwise pushed off the end of the bar. */
+  .statusbar-group:nth-child(n+2) { display: none; }
+}
+
+/* ─── Touch ───────────────────────────────────────────────────────
+   The interface is drawn at workstation density. On a finger-driven screen
+   the hit areas — not the type — are what has to grow, so the controls keep
+   their footprint and gain padding around the tap target instead. */
+
+@media (pointer: coarse) {
+  .tool-btn,
+  .icon-btn,
+  .btn { min-height: 32px; }
+
+  .tool-select,
+  .select-trigger { min-height: 32px; }
+
+  .rail-item { height: 40px; }
+
+  .data-table tbody td { height: 38px; }
+
+  .menu-item,
+  .select-option { padding-top: 9px; padding-bottom: 9px; }
+
+  .link-row,
+  .result-row { padding-top: var(--space-sm); padding-bottom: var(--space-sm); }
+
+  /* A 1px seam is not a drag handle a finger can find. It is widened
+     rather than removed: on a tablet the panes are still side by side, and
+     resizing them is how a 64-character address gets read. Below 860px the
+     panes are overlays with no column to resize, and the breakpoints above
+     drop the handle there. */
+  .splitter::after { inset: 0 -9px; }
+
+  /* Sideways scrolling is how the dense rows are read on a phone; it must
+     not hand the gesture up to the page behind. */
+  .table-wrap,
+  .tabs,
+  .graph-toolbar,
+  .settings-nav { overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
 }
