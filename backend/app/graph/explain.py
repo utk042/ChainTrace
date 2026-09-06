@@ -236,9 +236,11 @@ def explain_entity(detail: dict) -> Optional[dict]:
     score = detail.get("anomaly_score")
     if score:
         verdict.append(
-            f"Its anomaly score is {float(score):.1f} out of 100. The score is "
-            "how far this entity's behaviour sits from the typical wallet in "
-            "this dataset — it is a ranking, not a probability of wrongdoing."
+            f"Its risk score is {float(score):.1f} out of 100. That is how far this "
+            "entity's behaviour sits from the typical wallet in this dataset — it "
+            "ranks wallets for review. It is not a probability that an offence "
+            "occurred, and it cannot be: the model is trained on unlabelled data "
+            "and has never been shown a crime."
         )
     if alerts:
         models = sorted({a.get("model") for a in alerts if a.get("model")})
@@ -246,6 +248,27 @@ def explain_entity(detail: dict) -> Optional[dict]:
             f"{_plural(len(alerts), 'alert')} were raised against it"
             + (f", by {', '.join(models)}." if models else ".")
         )
+        # How well supported the finding is, which is a different question
+        # from how anomalous it is — and the one that decides whether this is
+        # worth an investigator's day.
+        levels = [a.get("evidence_confidence") for a in alerts if a.get("evidence_confidence")]
+        if levels:
+            best = "HIGH" if "HIGH" in levels else "MEDIUM" if "MEDIUM" in levels else "LOW"
+            rationale = next((a.get("evidence_rationale") for a in alerts
+                              if a.get("evidence_confidence") == best
+                              and a.get("evidence_rationale")), None)
+            verdict.append(
+                {
+                    "HIGH": "Evidence confidence is HIGH: more than one independent "
+                            "check points the same way.",
+                    "MEDIUM": "Evidence confidence is MEDIUM: something checkable "
+                              "supports this, but nothing corroborates it.",
+                    "LOW": "Evidence confidence is LOW: this is an unusual-behaviour "
+                           "flag with nothing independent behind it. Treat it as a "
+                           "place to start looking, not as a finding.",
+                }[best]
+                + (f" {rationale}" if rationale else "")
+            )
 
     return {
         "what_it_is": lines,

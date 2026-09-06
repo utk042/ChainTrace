@@ -44,6 +44,8 @@ def load_transactions(records: list[TransactionRecord], con: duckdb.DuckDBPyConn
                 r.geo_country_dst,
                 r.asn_src,
                 r.asn_dst,
+                r.geo_country,
+                r.asn,
             ))
 
         # Use INSERT OR REPLACE to handle re-ingestion
@@ -51,8 +53,9 @@ def load_transactions(records: list[TransactionRecord], con: duckdb.DuckDBPyConn
             INSERT OR REPLACE INTO transactions
             (txid, timestamp, src_ip, dst_ip, src_port, dst_port,
              input_addresses, output_addresses, input_amounts, output_amounts,
-             fee, script_type, geo_country_src, geo_country_dst, asn_src, asn_dst)
-            VALUES (?, ?::TIMESTAMP, ?, ?, ?, ?, ?::VARCHAR[], ?::VARCHAR[], ?::DOUBLE[], ?::DOUBLE[], ?, ?, ?, ?, ?, ?)
+             fee, script_type, geo_country_src, geo_country_dst, asn_src, asn_dst,
+             geo_country, asn)
+            VALUES (?, ?::TIMESTAMP, ?, ?, ?, ?, ?::VARCHAR[], ?::VARCHAR[], ?::DOUBLE[], ?::DOUBLE[], ?, ?, ?, ?, ?, ?, ?, ?)
         """, rows)
 
         # Also populate ip_metadata table

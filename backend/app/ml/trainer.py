@@ -26,6 +26,7 @@ from app.ml.features import (
 from app.ml.autoencoder import AnomalyDetector
 from app.ml.embeddings import GraphEmbedder
 from app.ml.explainer import AnomalyExplainer
+from app.ml.confidence import assess_evidence
 from app.models.alert import RiskTier
 
 from app.logging_config import get_logger
@@ -336,16 +337,31 @@ def run_full_pipeline() -> dict:
             model_str = " + ".join(dict.fromkeys(models))  # de-duplicate, keep order
             risk_tier = _risk_tier_for_score(score)
 
+            # How anomalous and how well supported are different questions.
+            # Grading them separately is the whole point: a 95 resting on one
+            # statistical detector is a weaker lead than a 72 with a peel
+            # chain and a watchlist neighbour behind it.
+            evidence = assess_evidence(
+                models,
+                peel_chain_depth=peel_data.get(addr, {}).get("peel_chain_depth", 0),
+                mixer_interactions=mixer_counts.get(addr, 0),
+                watchlist_hops=proximity_data.get(addr, {}).get("darknet_proximity_hops"),
+                anomaly_score=score,
+            )
+
             alert_id = f"ALT-{uuid.uuid4().hex[:8].upper()}"
             shap_json = json.dumps(shap_vals[:5])
 
             con.execute("""
                 INSERT INTO alerts
                 (alert_id, entity_id, entity_type, risk_tier, confidence,
-                 model, description, shap_values, timestamp, status)
-                VALUES (?, ?, 'wallet', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'pending')
+                 model, description, shap_values, timestamp, status,
+                 evidence_confidence, evidence_rationale, evidence_factors)
+                VALUES (?, ?, 'wallet', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'pending', ?, ?, ?)
             """, (alert_id, addr, risk_tier.value, round(score, 1),
-                  model_str, description, shap_json))
+                  model_str, description, shap_json,
+                  evidence["level"], evidence["rationale"],
+                  json.dumps(evidence["factors"])))
 
             con.execute("""
                 UPDATE wallet_features

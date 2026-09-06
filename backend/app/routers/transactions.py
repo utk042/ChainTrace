@@ -43,7 +43,8 @@ def list_transactions(
         rows = con.execute(f"""
             SELECT txid, timestamp, src_ip, dst_ip, src_port, dst_port,
                    input_addresses, output_addresses, input_amounts, output_amounts,
-                   fee, script_type, geo_country_src, geo_country_dst, asn_src, asn_dst
+                   fee, script_type, geo_country_src, geo_country_dst, asn_src, asn_dst,
+                   geo_country, asn
             FROM transactions
             WHERE {where}
             ORDER BY {sort_by} {order}
@@ -63,6 +64,8 @@ def list_transactions(
                 "fee": r[10], "script_type": r[11],
                 "geo_country_src": r[12], "geo_country_dst": r[13],
                 "asn_src": r[14], "asn_dst": r[15],
+                # As supplied with the record, distinct from the inferred pair.
+                "geo_country": r[16], "asn": r[17],
                 "total_input": total_in, "total_output": total_out,
             })
 
@@ -76,7 +79,8 @@ def get_transaction_detail(txid: str):
         row = con.execute("""
             SELECT txid, timestamp, src_ip, dst_ip, src_port, dst_port,
                    input_addresses, output_addresses, input_amounts, output_amounts,
-                   fee, script_type, geo_country_src, geo_country_dst, asn_src, asn_dst
+                   fee, script_type, geo_country_src, geo_country_dst, asn_src, asn_dst,
+                   geo_country, asn
             FROM transactions WHERE txid = ?
         """, [txid]).fetchone()
 
@@ -116,6 +120,7 @@ def get_transaction_detail(txid: str):
             "fee": row[10], "script_type": row[11],
             "geo_country_src": row[12], "geo_country_dst": row[13],
             "asn_src": row[14], "asn_dst": row[15],
+            "geo_country": row[16], "asn": row[17],
             "total_input": total_in, "total_output": total_out,
             "behavioral_flags": list(set(flags)),
             "connected_alerts": [

@@ -32,7 +32,7 @@ logger = get_logger("app.main")
 # result is a UI rendering a half-populated response and an operator debugging
 # a bug that was already fixed on disk. The frontend compares this against the
 # revision it was built for and says so outright.
-API_REVISION = 2
+API_REVISION = 3
 
 PROCESS_ID = os.getpid()
 STARTED_AT = datetime.now(timezone.utc).isoformat(timespec="seconds")

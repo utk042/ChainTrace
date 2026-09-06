@@ -11,4 +11,4 @@
  * Bump it here and in backend/app/main.py together whenever a response shape
  * the UI depends on changes.
  */
-export const REQUIRED_API_REVISION = 2;
+export const REQUIRED_API_REVISION = 3;

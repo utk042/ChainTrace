@@ -35,13 +35,39 @@ class ShapFeature(BaseModel):
     contribution: float  # positive = pushes towards anomaly
 
 
+class EvidenceConfidence(str, Enum):
+    """How well supported a finding is — not how anomalous it is."""
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
+class EvidenceFactor(BaseModel):
+    """One thing that was observed, and what it is worth."""
+    factor: str
+    value: str
+    kind: str = Field(description="structural | watchlist | statistical")
+    note: str = ""
+    weight: Optional[str] = None
+
+
 class AlertRecord(BaseModel):
     """Alert record as stored in database."""
     alert_id: str
     entity_id: str
     entity_type: EntityType
     risk_tier: RiskTier
-    confidence: float = Field(ge=0, le=100)
+    # How far this entity's behaviour sits from the typical one in the
+    # dataset. A ranking, never a probability that an offence occurred.
+    risk_score: float = Field(ge=0, le=100)
+    # Kept as an alias of risk_score so older clients and the bundled
+    # snapshot keep working. Do not label it "confidence" in an interface:
+    # that is how a distance came to be shown as "95.0% confidence".
+    confidence: float = Field(ge=0, le=100, deprecated=True)
+    # The separate question: how much independent support the finding has.
+    evidence_confidence: Optional[EvidenceConfidence] = None
+    evidence_rationale: Optional[str] = None
+    evidence_factors: list[EvidenceFactor] = Field(default_factory=list)
     model: str = Field(description="Model that generated this alert")
     description: str
     shap_values: list[ShapFeature] = Field(default_factory=list)

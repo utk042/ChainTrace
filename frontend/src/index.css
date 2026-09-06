@@ -2472,6 +2472,102 @@ button.stat-tile:hover { background: var(--bg-well); }
 .graph-zoom button:last-child { border-bottom: none; }
 .graph-zoom button:hover { background: var(--bg-control); color: var(--text-primary); }
 
+/* ─── Risk score vs evidence confidence ──────────────────────────── */
+/*
+   Two different readings, so two different treatments. The score is coloured
+   by risk tier; the evidence grade is not, because a LOW-evidence CRITICAL
+   is exactly the case an investigator must be able to spot at a glance.
+*/
+.badge.evidence-high {
+  background: rgba(63, 178, 127, 0.16);
+  color: #7fd6ab;
+  border: 1px solid rgba(63, 178, 127, 0.4);
+}
+
+.badge.evidence-medium {
+  background: rgba(224, 136, 60, 0.14);
+  color: #e0a86c;
+  border: 1px solid rgba(224, 136, 60, 0.36);
+}
+
+.badge.evidence-low {
+  background: rgba(143, 153, 168, 0.12);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+}
+
+.badge.muted { background: none; color: var(--text-muted); border: 1px solid var(--border-soft); }
+
+.assessment {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md) var(--space-sm);
+}
+
+.assessment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.assessment-label {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.assessment-value { font-size: var(--text-md); font-weight: 600; }
+
+.assessment-caveat {
+  margin: 0;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-tertiary);
+}
+
+.evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md) var(--space-md);
+}
+
+.evidence-factor {
+  padding: var(--space-sm);
+  background: var(--bg-well);
+  border-left: 2px solid var(--border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* A pattern matched on the graph can be checked by hand; a statistical
+   outlier cannot. The border says which kind you are looking at. */
+.evidence-factor.kind-structural { border-left-color: #3fb27f; }
+.evidence-factor.kind-watchlist { border-left-color: var(--risk-elevated); }
+.evidence-factor.kind-statistical { border-left-color: var(--text-muted); }
+
+.evidence-factor-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.evidence-factor-name { font-size: var(--text-sm); color: var(--text-primary); font-weight: 500; }
+
+.evidence-factor-value { font-size: var(--text-sm); color: var(--text-secondary); }
+
+.evidence-factor-note {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
 /* ─── Graph: density notice, notes, plain summary ────────────────── */
 
 /* Said out loud, because a thinned graph and a sparse one look identical and

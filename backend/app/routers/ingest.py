@@ -447,7 +447,7 @@ def _execute_pipeline(file_path: str, run_id: str, clear_existing: bool):
         # Step 3: Validate
         stage = "validate"
         run.begin(stage, f"Validating {len(raw_records)} records...")
-        valid_records, errors = validate_records(iter(raw_records))
+        valid_records, errors, schema_report = validate_records(iter(raw_records))
         if not valid_records:
             sample = "; ".join(str(e) for e in errors[:3])
             raise ValueError(
@@ -457,7 +457,20 @@ def _execute_pipeline(file_path: str, run_id: str, clear_existing: bool):
         if errors:
             logger.warning("%s record(s) rejected during validation; first: %s",
                            len(errors), errors[0], extra={"run_id": run_id, "stage": stage})
-        run.finish(stage, f"{len(valid_records)} valid, {len(errors)} rejected")
+
+        # Said out loud, and in the run log an operator can read afterwards.
+        # A column the schema does not know is dropped either way; the point
+        # is that nobody finds out about it a week later.
+        summary_line = f"{len(valid_records)} valid, {len(errors)} rejected"
+        if schema_report.get("unknown_fields"):
+            logger.warning("Unrecognised column(s) in %s: %s. They were not stored.",
+                           Path(file_path).name,
+                           ", ".join(schema_report["unknown_fields"]),
+                           extra={"run_id": run_id, "stage": stage})
+            summary_line += (f" — {len(schema_report['unknown_fields'])} unrecognised "
+                             f"column(s) not stored: "
+                             f"{', '.join(schema_report['unknown_fields'])}")
+        run.finish(stage, summary_line)
 
         # Step 4: Enrich with GeoIP
         stage = "enrich"

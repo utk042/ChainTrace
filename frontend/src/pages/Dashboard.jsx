@@ -9,7 +9,7 @@ import { useCommands } from '../services/commands';
 import { useIsNarrow } from '../hooks/useMediaQuery';
 import { useResizablePane } from '../hooks/useResizablePane';
 import {
-  shortId, fmtInt, fmtPct, fmtTimestamp, riskVar,
+  shortId, fmtInt, fmtPct, fmtScore, fmtTimestamp, riskVar,
 } from '../services/format';
 import {
   RISK_COLORS, TYPE_COLORS, TEXT, chartAxis, chartValueAxis, chartTooltip,
@@ -392,7 +392,7 @@ export default function Dashboard() {
                       <span className="result-row-side">
                         <span className={`badge ${alert.risk_tier?.toLowerCase()}`}>{alert.risk_tier}</span>
                         <span className="mono" style={{ fontSize: 'var(--text-sm)', color: riskVar(alert.risk_tier) }}>
-                          {fmtPct(alert.confidence)}
+                          {fmtScore(alert.risk_score ?? alert.confidence, 1)}
                         </span>
                       </span>
                     </button>

@@ -38,6 +38,23 @@ export function fmtBtc(value, digits = 4) {
   })} BTC`;
 }
 
+/**
+ * A 0-100 risk score, written so it cannot be read as a percentage.
+ *
+ * The alert field holding this was named `confidence` in the first schema
+ * and rendered as "95.0% confidence", which says: we are 95% sure this
+ * wallet is criminal. It says nothing of the kind. It is how far the
+ * wallet's behaviour sits from the rest of the dataset, produced by a model
+ * trained on unlabelled data that has never been shown an offence. The
+ * "/100" is not decoration — it is the difference between a ranking and an
+ * accusation.
+ */
+export function fmtScore(value, digits = 1) {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = Number(value);
+  return Number.isFinite(n) ? `${n.toFixed(digits)}/100` : '—';
+}
+
 export function fmtPct(value, digits = 1) {
   if (value === null || value === undefined || value === '') return '—';
   const n = Number(value);

@@ -275,7 +275,9 @@ npm run test:offline    # the offline-first acceptance test, in a real browser
 npm run test:ui         # menus, dropdowns, shortcuts and chart hover
 
 cd ../backend
-python tests/airgap.py  # the backend with every non-loopback socket refused
+python tests/airgap.py         # every non-loopback socket refused
+python tests/ingest_schema.py  # the complete required dataset, CSV/JSON/XML
+python tests/confidence.py     # risk score and evidence confidence stay separate
 ```
 
 `test:ui` covers the chrome that only misbehaves under a pointer: that a
@@ -404,6 +406,76 @@ Figures drawn from the page currently loaded — the facet histograms beside a
 result list — are labelled *this page*, never presented as a census of the
 whole table.
 
+### Risk score is not a probability
+
+Two different questions get asked about a flagged wallet, and the system
+used to answer one while labelling it as the other.
+
+| | What it means | Range |
+| --- | --- | --- |
+| **Risk score** | How far this wallet's behaviour sits from the typical wallet in this dataset | 0-100 |
+| **Evidence confidence** | How much independent support the finding has | HIGH / MEDIUM / LOW |
+
+The alerts column holding the score has been named `confidence` since the
+first schema, and the interface printed it as *"95.0% confidence"* — an
+unsupervised outlier distance rendered as a probability that a wallet is
+criminal. It cannot be that: the autoencoder is trained on unlabelled data
+and has never been shown an offence. Nothing in the interface says
+"confidence" against a number any more, the CSV export column is headed
+**Risk Score (0-100)**, and the sentence explaining what the number is not
+travels with it from the API rather than being re-worded per screen.
+
+Evidence confidence is graded separately, in `backend/app/ml/confidence.py`:
+
+- **Structural detectors** — peel chains, CoinJoin-like mixing, consolidation
+  hubs — are deterministic pattern matches on the transaction graph. They can
+  be checked by hand and shown to someone.
+- **Watchlist proximity** is operator-supplied ground truth propagated
+  outward. One hop is a direct transaction with a designated wallet; by three
+  hops most of a connected graph qualifies and it says almost nothing.
+- **The autoencoder** says "unlike the others", which is a reason to look
+  rather than a finding. Alone it never grades above LOW, whatever it scores.
+
+HIGH needs two independent structural patterns, or one plus a direct
+watchlist link. The point of separating them is visible in the data: on the
+bundled 5,000-transaction sample a wallet scoring **100.0** grades **LOW**
+(a statistical outlier with nothing behind it) while one scoring **85.0**
+grades **HIGH** (a peel chain and a mixer interaction agreeing). Ranking by
+score alone puts them the wrong way round.
+
+Every alert carries the factors the grade rests on, each naming what kind of
+evidence it is and — where the heuristic has innocent explanations — saying
+so. A peel chain is also what ordinary wallet software does with change;
+mixing is legal and has real privacy uses; proximity is not participation.
+
+### Input schema
+
+The ingest accepts this dataset, in CSV, JSON or XML:
+
+```
+timestamp   src_ip   dst_ip   src_port   dst_port   txid
+input_addresses[]    output_addresses[]
+input_amounts[]      output_amounts[]
+fee         script_type         geo_country      asn
+```
+
+`geo_country` and `asn` are the attribution supplied *with* the record and
+are kept distinct from `geo_country_src`/`geo_country_dst` and
+`asn_src`/`asn_dst`, which the GeoIP step infers. A supplied value seeds the
+source endpoint and is never overwritten by a lookup: the operator's own
+value is evidence, the lookup's is inference, and a forensic record has to
+keep those apart.
+
+A column the schema does not recognise is **reported**, not discarded in
+silence — the run log and the validate stage both name it. Until that
+existed, a conforming file could validate with "0 errors" while two of its
+columns vanished, which is the worst failure mode available: it looks like
+it worked.
+
+`npm run` has no part in proving this. `python tests/ingest_schema.py`
+drives the real parser, validator, database and API and checks that all
+fourteen fields survive the round trip in every format.
+
 ### Reading the graph
 
 **Direction.** The entity graph is undirected, because Louvain clustering,
@@ -503,6 +575,7 @@ Prototype/
 │   │   │   ├── patterns.py          # Peeling-chain / CoinJoin / consolidation-hub detectors
 │   │   │   └── risk_propagation.py  # BFS risk propagation from seed wallets
 │   │   ├── ml/
+│   │   │   ├── confidence.py     # Evidence confidence, graded apart from the score
 │   │   │   ├── autoencoder.py    # Picks the backend below for this deployment
 │   │   │   ├── torch_backend.py  # PyTorch autoencoder (full profile)
 │   │   │   ├── light.py          # PCA linear autoencoder (light profile)
@@ -512,8 +585,10 @@ Prototype/
 │   ├── requirements.txt         # Full dependency set
 │   ├── requirements-light.txt   # Without torch / PyG / SHAP (~120 MB)
 │   ├── tests/
-│   │   └── airgap.py            # Runs the whole backend with every
-│   │                            # non-loopback socket refused
+│   │   ├── airgap.py            # Runs the whole backend with every
+│   │   │                        # non-loopback socket refused
+│   │   ├── ingest_schema.py     # The complete required input schema
+│   │   └── confidence.py        # Score and evidence confidence stay apart
 │   └── scripts/
 │       └── generate_synthetic.py
 └── frontend/

@@ -4,7 +4,7 @@ import Collapse from '../ui/Collapse';
 import CopyButton from '../ui/CopyButton';
 import { Loading, Notice } from '../ui/States';
 import {
-  shortId, fmtNum, fmtBtc, fmtInt, fmtTimestamp, scoreVar,
+  shortId, fmtNum, fmtBtc, fmtInt, fmtTimestamp, fmtScore, scoreVar,
 } from '../../services/format';
 import { getNotes, createNote, deleteNote } from '../../services/api';
 
@@ -414,7 +414,15 @@ export default function NodeInspector({
                 <div className="alert-note-head">
                   <span className={`badge ${a.risk_tier?.toLowerCase() || 'info'}`}>{a.risk_tier}</span>
                   <span className="mono muted">{a.model}</span>
-                  <b>{a.confidence?.toFixed(1)}</b>
+                  <b title="Risk score: how far this entity's behaviour sits from the typical wallet in this dataset. Not a probability of wrongdoing.">
+                    {fmtScore(a.risk_score ?? a.confidence, 1)}
+                  </b>
+                  {a.evidence_confidence && (
+                    <span className={`badge evidence-${a.evidence_confidence.toLowerCase()}`}
+                          title={a.evidence_rationale || 'How well supported this finding is.'}>
+                      {a.evidence_confidence}
+                    </span>
+                  )}
                 </div>
                 <p>{a.description}</p>
               </div>
