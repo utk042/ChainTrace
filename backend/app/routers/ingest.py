@@ -74,6 +74,53 @@ def _get_status() -> dict:
         return dict(_pipeline_status)
 
 
+def is_pipeline_running() -> bool:
+    """Whether a run currently holds the database and the CPU."""
+    with _status_lock:
+        return _pipeline_status.get("status") == "running"
+
+
+def pipeline_snapshot() -> dict:
+    """
+    The few fields of the run state other modules need, without copying the
+    whole record (which carries a traceback and a full stage list).
+
+    `/api/health` reads this on every poll, and a poll must stay cheap even
+    while a run is saturating the process.
+    """
+    with _status_lock:
+        return {
+            "status": _pipeline_status.get("status"),
+            "run_id": _pipeline_status.get("run_id"),
+            "stage": _pipeline_status.get("stage"),
+            "progress": _pipeline_status.get("progress"),
+            "message": _pipeline_status.get("message"),
+            "started_at": _pipeline_status.get("started_at"),
+        }
+
+
+def _busy_response(action: str) -> JSONResponse:
+    """
+    409 for anything that would disturb a run in flight.
+
+    A second run started over the first one clears the database the first is
+    still writing into, and an upload landing mid-run can be picked up by a
+    `/run` that follows as though it had been there all along. Both produce a
+    dataset nobody can account for afterwards, which for a forensic tool is
+    worse than a refusal. The UI disables these controls while a run is on,
+    but a second browser window — or curl — is not bound by that.
+    """
+    current = _get_status()
+    message = (f"A pipeline run ({current.get('run_id') or 'in progress'}) is still "
+               f"running, so {action} is unavailable until it finishes.")
+    return JSONResponse(
+        status_code=409,
+        # Both keys: `error` is what this API uses elsewhere, `detail` is what
+        # FastAPI's own HTTPException produces, and clients read one or other.
+        content={"error": message, "detail": message, "status": current},
+    )
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -183,6 +230,9 @@ def _resolve_data_file(file_path: str) -> Path:
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     """Upload a data file (CSV/JSON/XML) for ingestion."""
+    if is_pipeline_running():
+        return _busy_response("uploading a file")
+
     upload_dir = settings.DATA_DIR / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
     file_path = _safe_upload_path(upload_dir, file.filename)
@@ -221,9 +271,8 @@ async def run_pipeline(
     clear_existing: bool = True,
 ):
     """Trigger the full analysis pipeline."""
-    current = _get_status()
-    if current["status"] == "running":
-        return {"error": "Pipeline already running", "status": current}
+    if is_pipeline_running():
+        return _busy_response("starting another run")
 
     run_id = f"RUN-{uuid.uuid4().hex[:8].upper()}"
     _set_status(
@@ -306,6 +355,9 @@ async def generate_sample_data(
                        description="Number of synthetic transactions to generate."),
 ):
     """Generate synthetic sample data."""
+    if is_pipeline_running():
+        return _busy_response("generating a sample")
+
     import sys
     if str(settings.BASE_DIR) not in sys.path:
         sys.path.insert(0, str(settings.BASE_DIR))
@@ -356,6 +408,9 @@ async def fetch_real_data(
     real-data source for the network-layer (IP/port) fields — they are
     intentionally left blank; see app/ingestion/real_fetcher.py.
     """
+    if is_pipeline_running():
+        return _busy_response("fetching live blockchain data")
+
     try:
         records = list(fetch_recent_real_transactions(
             max_transactions=max_transactions, max_blocks=max_blocks,

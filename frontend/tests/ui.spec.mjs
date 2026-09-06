@@ -55,7 +55,15 @@ function check(ok, label, detail = '') {
   if (!ok) failures.push(label);
 }
 
-const server = createServer({ dist: DIST, snapshotPath: join(ROOT, 'src/demo/snapshot.json') });
+// What /api/ingest/status answers, changed from inside the test so the app
+// sees a run start and finish under it.
+const pipeline = { current: { status: 'completed', progress: 100, message: 'Idle.' } };
+
+const server = createServer({
+  dist: DIST,
+  snapshotPath: join(ROOT, 'src/demo/snapshot.json'),
+  overrides: { '/api/ingest/status': () => pipeline.current },
+});
 await new Promise((r) => server.listen(PORT, r));
 
 const browser = await chromium.launch({ args: ['--no-sandbox'], ...LAUNCH });
@@ -222,6 +230,107 @@ try {
   }
   check(seen > 0 && escaped === 0, 'the chart tooltip never leaves the chart',
     `${seen} positions, ${escaped} escaped`);
+
+  // ── Reloading the graph does not flash the canvas ────────────────
+  //
+  // The loading panel used to be opaque and immediate, so every reload of the
+  // graph — a re-layout, a reset, an exit from isolation — blanked a drawn
+  // canvas for the length of one request. Over a graph that is already there
+  // it now waits, and comes up translucent.
+  await page.goto(`${BASE}/graph`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('canvas', { timeout: 30000 });
+  await page.waitForTimeout(3000);
+  await page.evaluate(() => {
+    window.__overlays = { opaque: 0, soft: 0, canvasRemoved: 0 };
+    new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.removedNodes) {
+          if (n.nodeName === 'CANVAS') window.__overlays.canvasRemoved += 1;
+        }
+        for (const n of r.addedNodes) {
+          if (n.nodeType !== 1 || !n.classList?.contains('graph-overlay')) continue;
+          if (n.classList.contains('graph-overlay-soft')) window.__overlays.soft += 1;
+          else window.__overlays.opaque += 1;
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  await page.getByRole('button', { name: /^Reset$/ }).click();
+  await page.waitForTimeout(3000);
+  // Hovering and selecting must not rebuild the graph either — that resets the
+  // camera, which is the same flash by another route.
+  for (let i = 0; i < 20; i++) {
+    await page.mouse.move(420 + i * 14, 300 + (i % 9) * 11);
+    await page.waitForTimeout(60);
+  }
+  const overlays = await page.evaluate(() => window.__overlays);
+  check(overlays.opaque === 0, 'reloading a drawn graph never blanks the canvas',
+    JSON.stringify(overlays));
+  check(overlays.canvasRemoved === 0, 'the canvas survives a reload and a hover',
+    JSON.stringify(overlays));
+
+  // ── The data views are held back while the pipeline runs ─────────
+  //
+  // The pipeline clears every table before it refills them, so a wallet list,
+  // an alert queue or a graph drawn during a run belongs to no dataset that
+  // ever existed. These used to keep polling and drawing straight through one.
+  pipeline.current = {
+    status: 'running',
+    progress: 40,
+    run_id: 'RUN-TEST0001',
+    stage: 'load',
+    message: 'Loading into database...',
+    stages: [
+      { key: 'clear', label: 'Clear existing data', status: 'done' },
+      { key: 'parse', label: 'Parse data file', status: 'done' },
+      { key: 'load', label: 'Load into DuckDB', status: 'running' },
+      { key: 'analyse', label: 'Run ML analysis', status: 'pending' },
+    ],
+  };
+
+  await page.goto(`${BASE}/wallets`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.ingest-gate', { timeout: 20000 });
+  check(true, 'a data view is held back while a run is on');
+  check(await page.locator('tbody tr').count() === 0,
+    'no rows from the old dataset are painted first');
+  check(/Loading into database/.test(await page.locator('.ingest-gate').innerText()),
+    'the gate says where the run has got to');
+
+  for (const [path, label] of [['/', 'Overview'], ['/alerts', 'Alerts'],
+    ['/transactions', 'Transactions'], ['/graph', 'Graph']]) {
+    await page.goto(BASE + path, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(900);
+    check(await page.locator('.ingest-gate').count() > 0, `${label} is held back too`);
+  }
+
+  // Ingest itself stays open — it is where the run is — but takes no more data.
+  await page.goto(`${BASE}/ingest`, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(900);
+  check(await page.locator('.ingest-gate').count() === 0, 'Ingest stays open during a run');
+  check(await page.locator('.dropzone.disabled').count() > 0,
+    'the dropzone refuses files during a run');
+  check(await page.locator('input[type=file]').isDisabled(),
+    'the file picker is disabled during a run');
+  check(await page.getByRole('button', { name: /Upload file/i }).isDisabled(),
+    'Upload is disabled during a run');
+  check(await page.getByRole('button', { name: /Generate sample/i }).isDisabled(),
+    'Generate sample is disabled during a run');
+
+  await page.goto(`${BASE}/settings`, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(900);
+  check(await page.locator('.ingest-gate').count() === 0,
+    'Settings stays open during a run — it reads nothing from the dataset');
+
+  // ── And they come back, with the new data, when it finishes ──────
+  await page.goto(`${BASE}/wallets`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.ingest-gate', { timeout: 20000 });
+  pipeline.current = { status: 'completed', progress: 100, message: 'Pipeline complete.' };
+  await page.waitForFunction(() => document.querySelector('.ingest-gate') === null,
+    null, { timeout: 30000 });
+  await page.waitForTimeout(2500);
+  check(await page.locator('tbody tr').count() > 0,
+    'the view loads the dataset once the run finishes',
+    `${await page.locator('tbody tr').count()} rows`);
 
   check(errors.length === 0, 'no console errors', errors.slice(0, 3).join(' | '));
 } finally {

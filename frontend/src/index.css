@@ -2399,6 +2399,13 @@ button.stat-tile:hover { background: var(--bg-well); }
   z-index: var(--z-panel);
 }
 
+/* A reload over a graph that is already drawn: the canvas underneath stays
+   readable, so the redraw is a change of state rather than a blink. */
+.graph-overlay-soft {
+  background: rgba(17, 20, 24, 0.35);
+  backdrop-filter: blur(1px);
+}
+
 .graph-overlay h3 { font-size: var(--text-md); color: var(--text-primary); }
 .graph-overlay p { max-width: 46ch; line-height: 1.6; }
 .graph-overlay-actions { display: flex; gap: var(--space-sm); flex-wrap: wrap; justify-content: center; }
@@ -2581,6 +2588,7 @@ button.stat-tile:hover { background: var(--bg-well); }
   gap: var(--space-sm);
   max-width: 420px;
   padding: var(--space-sm) var(--space-md);
+  padding-right: var(--space-sm);
   background: var(--bg-chrome);
   border: 1px solid var(--risk-elevated);
   border-radius: var(--radius-md);
@@ -2588,7 +2596,17 @@ button.stat-tile:hover { background: var(--bg-well); }
   line-height: 1.5;
   color: var(--text-secondary);
   z-index: var(--z-float);
+  /* The text is not interactive, so it never steals a drag from the canvas
+     underneath — but the dismiss button has to be clickable. */
   pointer-events: none;
+}
+
+.graph-density-note .graph-density-text { flex: 1; }
+
+.graph-density-note .graph-density-close {
+  pointer-events: auto;
+  flex-shrink: 0;
+  margin-top: -2px;
 }
 
 .graph-density-dot {
@@ -3007,6 +3025,17 @@ button.stat-tile:hover { background: var(--bg-well); }
 
 .dropzone:hover { border-color: var(--accent); background: var(--bg-well); }
 .dropzone.active { border-color: var(--accent); background: var(--accent-bg); border-style: solid; }
+
+/* Inert while a run holds the pipeline: it must not look like it will take a
+   file the backend is going to refuse. */
+.dropzone.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  border-color: var(--border);
+  background: transparent;
+}
+
+.dropzone.disabled:hover { border-color: var(--border); background: transparent; }
 .dropzone svg { color: var(--text-tertiary); }
 
 .dropzone-text {
@@ -3472,3 +3501,79 @@ button.stat-tile:hover { background: var(--bg-well); }
   color: var(--accent-soft);
 }
 
+
+/* The moment before it is known whether a run is on. */
+.view-pending {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+/* ─── The gate over a data view while an ingest run is on ────────── */
+
+.ingest-gate {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: var(--space-xl);
+  overflow-y: auto;
+}
+
+.ingest-gate-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+  width: 100%;
+  max-width: 460px;
+  padding: var(--space-xl);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.ingest-gate-card h3 {
+  font-size: var(--text-md);
+  color: var(--text-primary);
+}
+
+.ingest-gate-card p {
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.ingest-gate-card .progress-track { width: 100%; }
+
+.ingest-gate-message {
+  font-size: var(--text-xs) !important;
+  color: var(--text-tertiary) !important;
+}
+
+.ingest-gate-stages {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-sm) var(--space-md);
+  font-size: var(--text-xs);
+}
+
+.ingest-gate-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ingest-gate-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: var(--text-xs);
+}

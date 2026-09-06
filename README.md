@@ -406,6 +406,28 @@ Figures drawn from the page currently loaded — the facet histograms beside a
 result list — are labelled *this page*, never presented as a census of the
 whole table.
 
+### While a pipeline run is on, the case views are closed
+
+A run clears every table before it refills them, and the ML stage after that
+rewrites the wallet scores, the clusters and the alerts. Anything read in
+between belongs to no dataset at all — a wallet list from the previous run
+joined against alerts from the one being written, on a graph built from
+neither. So Overview, Alerts, Wallets, Transactions and Graph are held back
+for the duration and show the run's progress instead; Ingest and Settings stay
+open. They reopen, and load the new dataset, the moment the run finishes.
+
+The same rule is enforced at the API, not only in the interface: `/upload`,
+`/run`, `/generate-sample` and `/fetch-real` answer **409** while a run is in
+flight, so a second browser window or a stray `curl` cannot start a run over
+one already going or slip a file into it half way through.
+
+`/api/health` deliberately does *not* read the database during a run — it
+serves the last counts it took, flagged with `counts_stale: true`, alongside
+the run state. A `COUNT(*)` issued into the middle of an ingest queues behind
+the writer, and a health poll that times out is how a busy backend came to be
+reported as an offline one. For the same reason the app now needs two failed
+probes in a row, four seconds apart, before it calls a backend gone.
+
 ### Risk score is not a probability
 
 Two different questions get asked about a flagged wallet, and the system

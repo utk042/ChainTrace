@@ -6,6 +6,7 @@ import Rail from './components/Layout/Rail';
 import ConnectionBanner from './components/Layout/ConnectionBanner';
 import StatusBar from './components/Layout/StatusBar';
 import ShortcutsDialog from './components/Layout/ShortcutsDialog';
+import IngestionGate from './components/Layout/IngestionGate';
 import UpdatePrompt from './components/Layout/UpdatePrompt';
 import ErrorBoundary from './components/ErrorBoundary';
 import { SessionProvider, useSession } from './state/SessionProvider';
@@ -31,6 +32,21 @@ const VIEW_COMPONENTS = {
   settings: Settings,
 };
 
+/**
+ * The views that read the case tables, and so cannot be shown while an ingest
+ * run is rewriting them. Ingest itself stays open — it is where the run is —
+ * and so does Settings, which reads nothing from the dataset.
+ */
+const DATA_VIEWS = new Set(['overview', 'alerts', 'wallets', 'transactions', 'graph']);
+
+const VIEW_LABELS = {
+  overview: 'The overview',
+  alerts: 'Alerts',
+  wallets: 'Wallets',
+  transactions: 'Transactions',
+  graph: 'The graph',
+};
+
 const Router = import.meta.env.VITE_HASH_ROUTER === 'true' ? HashRouter : BrowserRouter;
 
 /**
@@ -41,7 +57,7 @@ const Router = import.meta.env.VITE_HASH_ROUTER === 'true' ? HashRouter : Browse
  * reloads views or destroys graph state, filters, or selections.
  */
 function Shell() {
-  const { tabs, activeTabId } = useSession();
+  const { tabs, activeTabId, ingesting, ingestKnown } = useSession();
   useGlobalShortcuts();
 
   return (
@@ -57,6 +73,18 @@ function Shell() {
               {tabs.map((tab) => {
                 const Component = VIEW_COMPONENTS[tab.key] || Dashboard;
                 const isActive = tab.id === activeTabId;
+                // Unmounted rather than merely covered: a mounted view keeps
+                // polling, and its requests are exactly the reads that queue
+                // behind the run's writes. It mounts again — and loads the new
+                // dataset from scratch — the moment the run finishes.
+                //
+                // It also waits out the first status poll. A view mounted
+                // before that answer arrives has already fetched and painted
+                // by the time the gate could close over it, which is the flash
+                // of stale case data the gate exists to prevent.
+                const isData = DATA_VIEWS.has(tab.key);
+                const gated = isData && ingesting;
+                const pending = isData && !ingesting && !ingestKnown;
                 return (
                   <div
                     key={tab.id}
@@ -69,7 +97,13 @@ function Shell() {
                       height: '100%',
                     }}
                   >
-                    <Component tabId={tab.id} />
+                    {gated ? <IngestionGate view={VIEW_LABELS[tab.key]} />
+                      : pending ? (
+                        <div className="view-pending">
+                          <Loading label="Checking for a pipeline run…" />
+                        </div>
+                      )
+                        : <Component tabId={tab.id} />}
                   </div>
                 );
               })}

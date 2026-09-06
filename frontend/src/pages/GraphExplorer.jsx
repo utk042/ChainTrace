@@ -117,6 +117,22 @@ export default function GraphExplorer() {
     return pairs;
   }, [pathResult]);
 
+  // Whether the loading overlay is actually painted.
+  //
+  // A full-bleed panel over the canvas for the length of one fast request
+  // reads as a flash, and the graph reloads often: a re-layout, an isolate, an
+  // exit from isolation, a reset. So it appears at once only when there is no
+  // graph to hide — the first load — and otherwise waits a quarter of a second
+  // and comes up translucent, leaving the previous graph visible underneath.
+  const hasGraph = Boolean(graphData?.nodes?.length);
+  const [overlayShown, setOverlayShown] = useState(false);
+  useEffect(() => {
+    if (!loading) { setOverlayShown(false); return undefined; }
+    if (!hasGraph) { setOverlayShown(true); return undefined; }
+    const timer = setTimeout(() => setOverlayShown(true), 250);
+    return () => clearTimeout(timer);
+  }, [loading, hasGraph]);
+
   const flash = useCallback((message) => {
     setToast(message);
     setTimeout(() => setToast(null), 2600);
@@ -710,8 +726,8 @@ export default function GraphExplorer() {
         </div>
 
         {/* Overlay, never a branch that unmounts the canvas. */}
-        {loading && (
-          <div className="graph-overlay">
+        {overlayShown && (
+          <div className={`graph-overlay${hasGraph ? ' graph-overlay-soft' : ''}`}>
             <div className="spinner" />
             <span>Building entity graph…</span>
           </div>

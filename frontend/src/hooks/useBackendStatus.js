@@ -6,6 +6,21 @@ import { REQUIRED_API_REVISION } from '../services/apiContract';
 export { REQUIRED_API_REVISION };
 import { useOnline } from './useOnline';
 
+// How many probes in a row have to fail before the backend is called gone.
+//
+// One is not enough. An ingest run saturates the process — the ML stage pins a
+// core for minutes — and a health probe issued into the middle of it can take
+// longer than its own timeout. Reporting that as "BACKEND OFFLINE" tore the
+// banner open across every tab, which resized the workspace, which resized the
+// graph canvas, and put the whole window through a redraw for a backend that
+// was busy rather than gone. A genuine outage still fails every probe, so it
+// is reported one short retry later instead.
+const FAILURES_BEFORE_DOWN = 2;
+
+// After a first failure, don't sit out the whole poll interval before finding
+// out whether it was real.
+const RETRY_AFTER_FAILURE_MS = 4000;
+
 /**
  * Polls /api/health so the app can tell seven states apart:
  *
@@ -36,10 +51,19 @@ export function useBackendStatus(pollMs = 30000) {
   const onlineRef = useRef(online);
   onlineRef.current = online;
 
+  // Consecutive failed probes, and the timer for the quick retry after the
+  // first one. Refs, so a failure never re-runs the polling effect.
+  const failuresRef = useRef(0);
+  const everSucceededRef = useRef(false);
+  const retryRef = useRef(0);
+
   const check = useCallback(async () => {
+    clearTimeout(retryRef.current);
     try {
       const res = await getHealth();
       const health = res.data;
+      failuresRef.current = 0;
+      everSucceededRef.current = true;
       // An SPA rewrite that swallows /api returns index.html with a 200, so
       // a successful request is not enough: check the body's shape.
       // 'degraded' is still ChainTrace answering; only an unrecognised body
@@ -78,28 +102,37 @@ export function useBackendStatus(pollMs = 30000) {
       }
       setState({ status: health.has_data ? 'ready' : 'empty', health, cachedAt: null, error: null });
     } catch (e) {
-      setState({
-        status: 'down',
-        health: null,
-        cachedAt: null,
-        error: !onlineRef.current
-          ? 'This device is offline and nothing is stored for this backend yet.'
-          : e.response
-            ? `Backend responded ${e.response.status}.`
-            : 'No response from the backend.',
-      });
+      failuresRef.current += 1;
+      const error = !onlineRef.current
+        ? 'This device is offline and nothing is stored for this backend yet.'
+        : e.response
+          ? `Backend responded ${e.response.status}.`
+          : 'No response from the backend.';
+
+      // A backend that has answered before gets one more chance, taken
+      // shortly rather than at the next scheduled poll. A backend that has
+      // never answered is reported straight away — there is nothing there to
+      // give the benefit of the doubt to.
+      if (everSucceededRef.current && failuresRef.current < FAILURES_BEFORE_DOWN) {
+        retryRef.current = setTimeout(() => {
+          if (onlineRef.current) check();
+        }, RETRY_AFTER_FAILURE_MS);
+        return;
+      }
+
+      setState({ status: 'down', health: null, cachedAt: null, error });
     }
   }, []);
 
   useEffect(() => {
     check();
-    if (!pollMs) return undefined;
+    if (!pollMs) return () => clearTimeout(retryRef.current);
     const id = setInterval(() => {
       // Polling a backend the machine provably cannot reach only burns the
       // request timeout; the 'online' event re-checks the moment it can.
       if (onlineRef.current) check();
     }, pollMs);
-    return () => clearInterval(id);
+    return () => { clearInterval(id); clearTimeout(retryRef.current); };
   }, [check, pollMs]);
 
   // Re-probe immediately on reconnect rather than waiting out the interval.

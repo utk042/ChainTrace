@@ -59,6 +59,12 @@ function fromSnapshot(snapshot, pathname, params) {
     case '/api/settings': return snapshot.settings;
     case '/api/settings/seed-wallets': return snapshot.seed_wallets;
     case '/api/ingest/status': return { status: 'completed', progress: 100, message: 'Snapshot (no live pipeline).' };
+    // Answered rather than 404'd, for the same reason as /api/notes below: a
+    // stub that 404s where the real API answers turns a working panel into
+    // console noise for anything watching for errors.
+    case '/api/ingest/logs':
+    case '/api/logs':
+      return { run_id: null, status: 'completed', records: [], log_file: null };
     // The notes table is part of the case database, and a snapshot has none.
     // Answered rather than 404'd because the inspector reads it on every
     // selection, and a stub that 404s where the real API answers turns a
@@ -75,13 +81,33 @@ function fromSnapshot(snapshot, pathname, params) {
   }
 }
 
-export function createServer({ dist, snapshotPath, backend = null }) {
+/**
+ * `overrides` lets a test answer one path itself, and change that answer while
+ * the page is open — which is the only way to exercise anything that depends
+ * on the backend's state changing under a running app, such as a pipeline run
+ * starting and finishing.
+ *
+ * Keys are pathnames; values are `(searchParams) => body`. Returning
+ * `undefined` falls through to the snapshot.
+ */
+export function createServer({ dist, snapshotPath, backend = null, overrides = {} }) {
   const snapshot = backend ? null : JSON.parse(readFileSync(snapshotPath, 'utf8'));
 
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
 
     if (url.pathname.startsWith('/api/')) {
+      const override = overrides[url.pathname];
+      const overridden = typeof override === 'function'
+        ? override(url.searchParams, req)
+        : override;
+      if (overridden !== undefined) {
+        res.writeHead(overridden === null ? 404 : 200,
+          { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(overridden ?? { detail: 'not found' }));
+        return;
+      }
+
       if (backend) {
         try {
           const upstream = await fetch(backend + req.url, {
