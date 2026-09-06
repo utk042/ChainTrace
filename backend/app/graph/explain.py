@@ -206,6 +206,69 @@ def _ip_summary(entity_id: str, detail: dict) -> list[str]:
     return lines
 
 
+def _entity_summary(entity_id: str, features: dict, detail: dict) -> list[str]:
+    """
+    A collapsed actor, said out loud — and said as the inference it is.
+
+    Common-input-ownership is a heuristic, not an observation: it is very
+    reliable and it is still a claim, so the wording names it and quotes the
+    transactions that produced it. An investigator reading this must be able to
+    tell "these addresses signed together in tx X" from "these addresses are
+    the same person", because only the first one is evidence.
+    """
+    lines: list[str] = []
+    size = int(detail.get("entity_size") or features.get("address_count") or 1)
+    witnesses = detail.get("cospend_witnesses") or []
+
+    lines.append(
+        f"This is one actor holding {_plural(size, 'address', 'addresses')}. They are grouped "
+        f"because each of them helped fund the same transaction as another, and "
+        f"whoever signs a transaction's inputs controls all of them — the "
+        f"common-input-ownership heuristic. That is an inference from spending "
+        f"behaviour, not a stated fact about who owns what."
+    )
+
+    if witnesses:
+        # Head and tail, not head alone: two txids from the same block can
+        # share a long leading run of zeros and would print identically.
+        shown = ", ".join(f"{w[:10]}…{w[-6:]}" if len(w) > 20 else w
+                          for w in witnesses[:3])
+        more = f" and {len(witnesses) - 3} other transaction(s)" if len(witnesses) > 3 else ""
+        lines.append(f"The grouping rests on {shown}{more}.")
+
+    tx_count = int(features.get("tx_count") or 0)
+    received = features.get("total_received") or 0
+    sent = features.get("total_sent") or 0
+    if tx_count:
+        lines.append(
+            f"Across those addresses it appears in {_plural(tx_count, 'transaction')}, "
+            f"receiving {_btc(received)} and sending {_btc(sent)}."
+        )
+
+    worst = features.get("worst_address")
+    tier = features.get("risk_tier") or detail.get("risk_tier")
+    score = features.get("anomaly_score") or detail.get("anomaly_score")
+    if worst and tier and tier != "Normal":
+        lines.append(
+            f"Its risk is taken from its most anomalous address, {worst}, which "
+            f"scores {float(score or 0):.0f} and sits in the {tier} band — an actor "
+            f"is only as clean as the worst address it controls."
+        )
+
+    hops = features.get("darknet_proximity_hops")
+    if hops is not None:
+        lines.append(
+            f"Its closest address is {_plural(int(hops), 'hop')} from a wallet on "
+            f"the operator's watchlist."
+        )
+
+    lines.append(
+        "Switch to the address view to see the members individually; the figures "
+        "above are their totals."
+    )
+    return lines
+
+
 def explain_entity(detail: dict) -> Optional[dict]:
     """
     A plain-language reading of an entity record.
@@ -221,6 +284,8 @@ def explain_entity(detail: dict) -> Optional[dict]:
 
     if node_type == "wallet":
         lines = _wallet_summary(detail["id"], features, detail)
+    elif node_type == "entity":
+        lines = _entity_summary(detail["id"], features, detail)
     elif node_type == "transaction":
         lines = _transaction_summary(detail["id"], features)
     elif node_type == "ip":

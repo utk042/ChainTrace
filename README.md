@@ -278,6 +278,7 @@ cd ../backend
 python tests/airgap.py         # every non-loopback socket refused
 python tests/ingest_schema.py  # the complete required dataset, CSV/JSON/XML
 python tests/confidence.py     # risk score and evidence confidence stay separate
+python tests/entities.py       # co-spending is a partition, and collapsing keeps the amounts
 ```
 
 `test:ui` covers the chrome that only misbehaves under a pointer: that a
@@ -396,7 +397,7 @@ squeezing the table.
 
 - **Overview** — KPI tiles, activity timeline, wallet-risk make-up, prioritised alerts, and a histogram panel whose rows link through to the filtered view they describe
 - **Alerts** — Three-pane triage: server-side filters (tier, disposition, confidence floor, entity type, model), sortable columns, and a detail pane with the model's SHAP explanation and a disposition control that writes straight to the backend
-- **Graph Explorer** — Interactive Sigma.js link chart: ranked entity search, node/risk filtering, incremental expansion, shortest-path tracing between two entities, a full entity inspector, client-side force re-layout, PNG/JSON export and keyboard shortcuts (see below)
+- **Graph Explorer** — Interactive Sigma.js link chart: an Addresses/Entities grouping control (see below), ranked entity search, node/risk/link-type filtering, incremental expansion, shortest-path tracing between two entities, a full entity inspector, client-side force re-layout, PNG/JSON export and keyboard shortcuts (see below)
 - **Wallets** — Wallet browser with a tabbed detail pane (Overview / Features / Links / Transactions): pattern badges (peeling chain / mixer / seed proximity), an anomaly-score meter, and a Node2Vec-powered "Similar wallets" list. The address under review lives in the URL, so it survives a reload and can be linked to
 - **Transactions** — Ledger browser with a tabbed detail pane (Overview / Inputs / Outputs / Network) and a summary panel over the loaded page
 - **Ingest** — File upload, synthetic sample generation, or a live fetch of real Blockstream data, then pipeline execution
@@ -405,6 +406,48 @@ squeezing the table.
 Figures drawn from the page currently loaded — the facet histograms beside a
 result list — are labelled *this page*, never presented as a census of the
 whole table.
+
+### Co-spending addresses are one actor, not a clique
+
+The common-input-ownership heuristic says that whoever signs a transaction
+controls every address funding it. That is one fact about a set of addresses,
+and it is transitive: if A and B are spent together and B and C are spent
+together, A, B and C are one actor.
+
+It used to be recorded as an edge between every pair. A transaction with 224
+inputs therefore contributed 24,976 links on its own, and a 500-transaction
+pull from the live chain arrived carrying tens of thousands of them — almost
+all restatements of a few dozen observations. The canvas became a mat, every
+degree-derived figure (node size, the "Connections" count, neighbour and search
+ordering) read one co-spend of 200 inputs as 199 relationships, and Louvain,
+run over a graph dominated by those cliques, mostly rediscovered them.
+
+So it is stored as what it is — a partition, computed by union-find in
+`backend/app/graph/entities.py`. The pairwise edges are not drawn at all: two
+addresses spent together are still one hop apart through the transaction that
+spent them, so nothing becomes unreachable. On a consolidation-heavy dataset
+that is the difference between ~93,000 links and ~4,500.
+
+The Graph Explorer's **Grouping** control then offers two readings of the same
+data:
+
+- **Addresses** — the literal chain, one node per address.
+- **Entities** — one node per actor. A 224-input consolidation stops being 224
+  tiles joined by 24,976 inferred links and becomes one entity, one arrow into
+  the transaction, one arrow out to whoever was paid. Amounts are summed, the
+  member addresses ride along on the node, and an entity's risk is the worst of
+  its members — an actor is only as clean as the worst address it controls.
+
+Opening an entity lists its member addresses and names the transactions the
+grouping rests on, because the heuristic is an inference and an investigator
+has to be able to go and read the spends behind it rather than take it on
+trust. The synthetic `entity:` handle is never shown or copied: it means
+nothing outside this process.
+
+**Link types** are separately switchable in the filter panel — payments, IP
+observations, and the co-spend edges that graphs built before this change still
+carry. Payments are the evidence; the rest is context, and being able to switch
+the context off is what makes a dense graph readable without hiding a payment.
 
 ### While a pipeline run is on, the case views are closed
 
@@ -591,9 +634,10 @@ Prototype/
 │   │   ├── ingestion/            # parser / validator / enricher / loader
 │   │   │   └── real_fetcher.py   # Real Bitcoin data via Blockstream's Esplora API
 │   │   ├── graph/
-│   │   │   ├── builder.py           # Entity graph construction
+│   │   │   ├── builder.py           # Entity graph construction + the entity collapse
+│   │   │   ├── entities.py          # Common-input-ownership as a union-find partition
 │   │   │   ├── explain.py           # Plain-language entity summaries
-│   │   │   ├── clustering.py        # Louvain + Node2Vec-based cluster refinement
+│   │   │   ├── clustering.py        # Louvain over entities + Node2Vec refinement
 │   │   │   ├── patterns.py          # Peeling-chain / CoinJoin / consolidation-hub detectors
 │   │   │   └── risk_propagation.py  # BFS risk propagation from seed wallets
 │   │   ├── ml/
@@ -610,7 +654,8 @@ Prototype/
 │   │   ├── airgap.py            # Runs the whole backend with every
 │   │   │                        # non-loopback socket refused
 │   │   ├── ingest_schema.py     # The complete required input schema
-│   │   └── confidence.py        # Score and evidence confidence stay apart
+│   │   ├── confidence.py        # Score and evidence confidence stay apart
+│   │   └── entities.py          # Common-input-ownership as a partition
 │   └── scripts/
 │       └── generate_synthetic.py
 └── frontend/

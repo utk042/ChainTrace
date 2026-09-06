@@ -12,6 +12,7 @@ from app.models.graph import GraphNode, GraphEdge, GraphData
 # Color map by node type and risk
 NODE_COLORS = {
     "wallet": "#5FD4D0",
+    "entity": "#4FBFA8",
     "ip": "#B28EE0",
     "transaction": "#5C6473",
 }
@@ -27,6 +28,9 @@ RISK_COLORS = {
 # Wallets get the widest range; transactions and IPs stay small.
 SIZE_RANGE = {
     "wallet": (3.0, 11.0),
+    # An actor stands for every address it holds, so it starts larger than a
+    # lone address and its membership pushes it further — see _node_size.
+    "entity": (5.0, 15.0),
     "ip": (2.5, 7.0),
     "transaction": (2.0, 5.5),
     "unknown": (2.5, 6.0),
@@ -37,15 +41,22 @@ SIZE_RANGE = {
 DEGREE_SATURATION = 40.0
 
 
-def _node_size(node_type: str, degree: int, anomaly_score: float) -> float:
+def _node_size(node_type: str, degree: int, anomaly_score: float,
+               member_count: int = 1) -> float:
     """
     Node radius in screen pixels: connectivity first, with a bump for risk.
 
     sqrt makes area rather than radius scale with degree, which keeps the
     growth perceptually even.
+
+    For a collapsed actor, degree alone understates it: an entity holding 200
+    addresses may touch only three transactions, and would draw the same as a
+    lone address that did. `member_count` is folded in on the same sqrt scale
+    so how much of the chain an actor owns is legible before it is clicked.
     """
     lo, hi = SIZE_RANGE.get(node_type, SIZE_RANGE["unknown"])
-    ratio = min(1.0, math.sqrt(max(0, degree) / DEGREE_SATURATION))
+    reach = max(0, degree) + max(0, member_count - 1)
+    ratio = min(1.0, math.sqrt(reach / DEGREE_SATURATION))
     size = lo + (hi - lo) * ratio
     # Up to 25% larger, so an isolated high-risk node stays findable.
     if anomaly_score:
@@ -57,6 +68,23 @@ def _truncate(node_id: str, keep_head: int = 8, keep_tail: int = 6) -> str:
     if len(node_id) <= keep_head + keep_tail + 3:
         return node_id
     return f"{node_id[:keep_head]}…{node_id[-keep_tail:]}"
+
+
+def _node_label(node_id: str, data: dict) -> str:
+    """
+    What is printed under a node.
+
+    An actor is labelled by the address it is named after and the number of
+    others it holds — "bc1q3kz5…eemk0w +119". The synthetic "entity:" prefix is
+    never shown: it is an internal handle, and printing it would put the same
+    seven characters under every collapsed node on the canvas.
+    """
+    if data.get("node_type") == "entity":
+        base = data.get("entity_id") or node_id
+        extra = max(0, (data.get("entity_size") or 1) - 1)
+        label = _truncate(base)
+        return f"{label} +{extra}" if extra else label
+    return _truncate(node_id)
 
 
 # Which relationships are a movement of value, and which are an inference or
@@ -164,8 +192,12 @@ def graph_to_json(
     # Sample if too large
     if truncated:
         # Prioritize wallet nodes with high degree
-        wallet_nodes = [(n, G.degree(n)) for n, d in G.nodes(data=True)
-                        if d.get("node_type") == "wallet"]
+        # Actors count as wallets here: in the collapsed view most of the
+        # holders of value *are* entity nodes, and sampling only plain wallets
+        # would drop exactly the ones worth looking at.
+        wallet_nodes = [(n, G.degree(n) + (d.get("entity_size") or 1) - 1)
+                        for n, d in G.nodes(data=True)
+                        if d.get("node_type") in ("wallet", "entity")]
         wallet_nodes.sort(key=lambda x: -x[1])
         keep_wallets = [n for n, _ in wallet_nodes[:max_nodes // 2]]
 
@@ -203,11 +235,12 @@ def graph_to_json(
 
         nodes.append(GraphNode(
             id=node_id,
-            label=_truncate(node_id),
+            label=_node_label(node_id, data),
             node_type=node_type,
             x=pos[0] * 500,  # Scale for Sigma.js
             y=pos[1] * 500,
-            size=_node_size(node_type, degree, anomaly_score),
+            size=_node_size(node_type, degree, anomaly_score,
+                            data.get("entity_size") or 1),
             color=color,
             cluster_id=data.get("cluster_id"),
             risk_tier=risk_tier if risk_tier != "Normal" else None,
@@ -228,6 +261,7 @@ def graph_to_json(
         "total_nodes": G.number_of_nodes(),
         "total_edges": G.number_of_edges(),
         "wallet_count": sum(1 for _, d in G.nodes(data=True) if d.get("node_type") == "wallet"),
+        "entity_count": sum(1 for _, d in G.nodes(data=True) if d.get("node_type") == "entity"),
         "ip_count": sum(1 for _, d in G.nodes(data=True) if d.get("node_type") == "ip"),
         "tx_count": sum(1 for _, d in G.nodes(data=True) if d.get("node_type") == "transaction"),
         "cluster_count": len(clusters),

@@ -59,10 +59,86 @@ function check(ok, label, detail = '') {
 // sees a run start and finish under it.
 const pipeline = { current: { status: 'completed', progress: 100, message: 'Idle.' } };
 
+// A tiny hand-made entity graph, served when the app asks for the collapsed
+// view. The bundled snapshot predates entities — it still carries co_input
+// edges — so the grouped view has to be stubbed to be exercised at all.
+const ENTITY_ID = 'entity:bc1qtestactor0000000000000000000001';
+const ENTITY_MEMBERS = Array.from(
+  { length: 12 }, (_, i) => `bc1qtestactor${String(i).padStart(20, '0')}`,
+);
+
+const entityGraph = {
+  ready: true,
+  grouped: 'entity',
+  entity_summary: { addresses: 20, entities: 9, multi_address_entities: 1, largest_entity: 12 },
+  nodes: [
+    {
+      id: ENTITY_ID, label: 'bc1qtest…000001 +11', node_type: 'entity',
+      x: 0, y: 0, size: 12, color: '#2d9d78', risk_tier: 'High', anomaly_score: 81,
+      metadata: { degree: 2, entity_size: 12 },
+    },
+    {
+      id: 'txstub0000000000000000000000000000000001', label: 'txstub…000001',
+      node_type: 'transaction', x: 120, y: 40, size: 4, color: '#8f99a8',
+      metadata: { degree: 2 },
+    },
+    {
+      id: 'bc1qlonewallet00000000000000000000000001', label: 'bc1qlone…000001',
+      node_type: 'wallet', x: -110, y: 60, size: 5, color: '#4c90f0',
+      metadata: { degree: 1 },
+    },
+  ],
+  edges: [
+    {
+      id: 'ee0', source: ENTITY_ID, target: 'txstub0000000000000000000000000000000001',
+      edge_type: 'wallet_input', weight: 1, color: '#3A6E7A',
+      metadata: { amount: 3.5, directed: true },
+    },
+    {
+      id: 'ee1', source: 'txstub0000000000000000000000000000000001',
+      target: 'bc1qlonewallet00000000000000000000000001',
+      edge_type: 'wallet_output', weight: 1, color: '#3A6E55',
+      metadata: { amount: 3.4, directed: true },
+    },
+  ],
+  clusters: {},
+  stats: {
+    total_nodes: 3, total_edges: 2, wallet_count: 1, entity_count: 1,
+    ip_count: 0, tx_count: 1, cluster_count: 0, truncated: false,
+  },
+};
+
+const entityDetail = {
+  found: true, id: ENTITY_ID, node_type: 'entity', degree: 1,
+  entity_size: 12, members: ENTITY_MEMBERS, members_truncated: false,
+  cospend_witnesses: ['txstub0000000000000000000000000000000001'],
+  risk_tier: 'High', anomaly_score: 81, cluster_id: 3,
+  neighbor_types: { transaction: 1 }, counterparties: [], alerts: [],
+  member_scores: ENTITY_MEMBERS.slice(0, 4).map((address, i) => ({
+    address, anomaly_score: 81 - i * 7, risk_tier: i ? 'Elevated' : 'High',
+  })),
+  features: {
+    address_count: 12, tx_count: 30, total_received: 4.2, total_sent: 3.5,
+    worst_address: ENTITY_MEMBERS[0], risk_tier: 'High', anomaly_score: 81,
+  },
+  summary: {
+    what_it_is: ['This is one actor holding 12 addresses, grouped by the '
+      + 'common-input-ownership heuristic.'],
+    why_flagged: [], caveat: 'It describes behaviour, not intent.',
+  },
+  attributes: {},
+};
+
 const server = createServer({
   dist: DIST,
   snapshotPath: join(ROOT, 'src/demo/snapshot.json'),
-  overrides: { '/api/ingest/status': () => pipeline.current },
+  overrides: {
+    '/api/ingest/status': () => pipeline.current,
+    // Only the collapsed view is stubbed; the address view still comes from
+    // the snapshot, so the two are genuinely different graphs here.
+    '/api/graph/data': (params) => (params.get('group') === 'entity' ? entityGraph : undefined),
+    [`/api/graph/node/${ENTITY_ID}`]: () => entityDetail,
+  },
 });
 await new Promise((r) => server.listen(PORT, r));
 
@@ -167,8 +243,10 @@ try {
     { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(8000);
 
-  // Node shape sits next to the layout control and swaps in place.
-  const shape = page.locator('.select-trigger').nth(1);
+  // Located by its label, not its position: the toolbar has gained controls
+  // before, and an index quietly starts testing whichever dropdown moved into
+  // the slot instead.
+  const shape = page.locator('.select-trigger[aria-label="Node shape"]');
   await shape.click();
   await page.waitForTimeout(300);
   const shapes = (await page.locator('.select-option').allTextContents()).map((t) => t.trim());
@@ -230,6 +308,74 @@ try {
   }
   check(seen > 0 && escaped === 0, 'the chart tooltip never leaves the chart',
     `${seen} positions, ${escaped} escaped`);
+
+  // ── Co-spending addresses can be drawn as the actor they are ─────
+  //
+  // The co-input heuristic used to be stored as an edge between every pair of
+  // co-spending addresses, so one 224-input consolidation put 24,976 links on
+  // the canvas and a 500-transaction pull from the live chain was an
+  // unreadable mat. It is a partition now, and this is the view that uses it.
+  await page.goto(`${BASE}/graph`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('canvas', { timeout: 30000 });
+  await page.waitForTimeout(3000);
+
+  check(!/Entity/.test(await page.locator('.graph-footer').innerText()),
+    'the entity legend row is hidden while addresses are drawn');
+
+  const grouping = page.locator('.select-trigger[aria-label="Grouping"]');
+  check(await grouping.count() === 1, 'the toolbar offers a grouping control');
+  await grouping.click();
+  await page.waitForTimeout(300);
+  const groupings = (await page.locator('.select-option').allTextContents()).map((t) => t.trim());
+  check(groupings.includes('Addresses') && groupings.includes('Entities'),
+    'both groupings are offered', groupings.join(', '));
+  await page.getByRole('option', { name: 'Entities' }).click();
+
+  await page.waitForFunction(() => {
+    const rows = [...document.querySelectorAll('.histogram-row, .hist-row')]
+      .map((r) => r.innerText.replace(/\s+/g, ' ').trim());
+    return rows.some((r) => /^Entity [1-9]/.test(r));
+  }, null, { timeout: 30000 });
+  check(true, 'switching to entities loads the collapsed graph');
+  check(/Entity/.test(await page.locator('.graph-footer').innerText()),
+    'the entity legend row appears with it');
+  check(await page.evaluate(() => document.querySelectorAll('canvas').length) > 0,
+    'the canvas survives the switch');
+
+  // Opening an actor: what it holds, and what the grouping rests on.
+  await page.goto(`${BASE}/graph?q=${encodeURIComponent(ENTITY_ID)}`,
+    { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(6000);
+  const inspector = await page.locator('.inspector').innerText().catch(() => '');
+  check(/Entity · 12 addresses/.test(inspector), 'the inspector names the actor and its size');
+  check(/Member addresses/.test(inspector), 'it lists the addresses the actor holds');
+  check(/Grouped by/.test(inspector), 'it names the transaction the grouping rests on');
+  check(!/entity:/.test(inspector),
+    'the internal handle is never shown — it means nothing outside this process');
+  check(/common-input-ownership/.test(inspector),
+    'the summary calls the grouping a heuristic rather than asserting ownership');
+
+  // ── A link layer can be switched off ─────────────────────────────
+  //
+  // The snapshot predates entities and still carries co_input edges, which is
+  // exactly the case the filter exists for.
+  await page.goto(`${BASE}/graph`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('canvas', { timeout: 30000 });
+  await page.waitForTimeout(3000);
+  await page.getByRole('button', { name: /Filters/i }).first().click();
+  await page.waitForTimeout(500);
+  const panel = await page.locator('.graph-float').innerText();
+  check(/link types/i.test(panel), 'the filter panel offers link types');
+  for (const layer of ['Payments', 'IP observations', 'Co-spend links']) {
+    check(panel.includes(layer), `"${layer}" is separately switchable`);
+  }
+  const drawnBefore = await page.evaluate(() =>
+    Number((document.body.innerText.match(/Edges drawn\s+([\d,]+)/) || [])[1]?.replace(/,/g, '') || 0));
+  await page.locator('.graph-float label', { hasText: 'Co-spend links' }).locator('input').click();
+  await page.waitForTimeout(1200);
+  check(await page.evaluate(() => document.querySelectorAll('canvas').length) > 0,
+    'hiding a link layer does not tear down the canvas', `${drawnBefore} edges before`);
+  await page.keyboard.press('Escape');
 
   // ── Reloading the graph does not flash the canvas ────────────────
   //

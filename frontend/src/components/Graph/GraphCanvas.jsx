@@ -10,7 +10,7 @@ import { CANVAS, nodeColor } from '../../theme';
 import { riskVar, fmtInt } from '../../services/format';
 import { NodeTileProgram, NodeDiscProgram } from './nodeRenderer';
 import { glyphFor } from './nodeGlyphs';
-import { orient, isFlow, FLOW_COLORS, describeEdge } from './edgeSemantics';
+import { orient, isFlow, FLOW_COLORS, describeEdge, layerOf } from './edgeSemantics';
 
 /**
  * Slender, sharp directional arrow program.
@@ -356,6 +356,7 @@ function Reducers({
     if (!isSigmaAlive(sigma)) return;
 
     const typeFilter = filters?.types;
+    const layerFilter = filters?.layers;
     const minScore = filters?.minScore || 0;
     const hasPath = pathNodes && pathNodes.size > 0;
 
@@ -373,12 +374,20 @@ function Reducers({
       return true;
     };
 
+    /** A link layer the operator has switched off in the filter panel. */
+    const layerHidden = (data) => Boolean(layerFilter)
+      && layerFilter[layerOf(data.edge_type)] === false;
+
     // Counted here in one pass, not tallied inside the reducer: Sigma runs
     // the reducer once per render layer, so a counter incremented in it
     // reported several times the number of edges that exist.
     let withheld = 0;
     if (overBudget) {
       graph.forEachEdge((edge, data, source, target) => {
+        // A link the operator has already hidden is not being withheld from
+        // them, and counting it as such would inflate the notice into
+        // claiming the canvas is holding back their own filter.
+        if (layerHidden(data)) return;
         if (withhold(edge, data, source, target)) withheld += 1;
       });
     }
@@ -454,6 +463,12 @@ function Reducers({
     sigma.setSetting('edgeReducer', (edge, data) => {
       const res = { ...data };
       const [source, target] = graph.extremities(edge);
+
+      // Switched off in the filter panel.
+      if (layerHidden(data)) {
+        res.hidden = true;
+        return res;
+      }
 
       // An inferred link on a graph too dense to draw. Kept for a selection's
       // own neighbourhood and for a hovered edge, which is where the

@@ -97,7 +97,12 @@ export function createServer({ dist, snapshotPath, backend = null, overrides = {
     const url = new URL(req.url, 'http://localhost');
 
     if (url.pathname.startsWith('/api/')) {
-      const override = overrides[url.pathname];
+      // Decoded first: an id with a colon in it (an entity handle) arrives
+      // percent-encoded, and an override keyed by the readable path would
+      // silently never match.
+      let pathname = url.pathname;
+      try { pathname = decodeURIComponent(pathname); } catch { /* leave as-is */ }
+      const override = overrides[pathname] ?? overrides[url.pathname];
       const overridden = typeof override === 'function'
         ? override(url.searchParams, req)
         : override;
