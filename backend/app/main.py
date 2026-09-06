@@ -16,7 +16,10 @@ from app.database import init_database, close_database, get_db
 from app.logging_config import (
     configure_logging, get_logger, log_file_path, std_streams_broken,
 )
-from app.routers import dashboard, alerts, graph_explorer, wallets, transactions, ingest, settings as settings_router
+from app.routers import (
+    dashboard, alerts, graph_explorer, wallets, transactions, ingest, notes,
+    settings as settings_router,
+)
 
 configure_logging()
 logger = get_logger("app.main")
@@ -152,6 +155,7 @@ app.include_router(wallets.router)
 app.include_router(transactions.router)
 app.include_router(ingest.router)
 app.include_router(settings_router.router)
+app.include_router(notes.router)
 
 
 API_INFO = {

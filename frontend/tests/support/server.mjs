@@ -59,7 +59,19 @@ function fromSnapshot(snapshot, pathname, params) {
     case '/api/settings': return snapshot.settings;
     case '/api/settings/seed-wallets': return snapshot.seed_wallets;
     case '/api/ingest/status': return { status: 'completed', progress: 100, message: 'Snapshot (no live pipeline).' };
-    default: return null;
+    // The notes table is part of the case database, and a snapshot has none.
+    // Answered rather than 404'd because the inspector reads it on every
+    // selection, and a stub that 404s where the real API answers turns a
+    // working panel into console noise for anything watching for errors.
+    case '/api/notes': return { notes: [], total: 0 };
+    case '/api/notes/counts': return { counts: {} };
+    default:
+      if (pathname.startsWith('/api/graph/node/')) {
+        const id = decodeURIComponent(pathname.slice('/api/graph/node/'.length));
+        return snapshot.node_details?.[id]
+          || { found: false, id, reason: 'not_in_snapshot' };
+      }
+      return null;
   }
 }
 

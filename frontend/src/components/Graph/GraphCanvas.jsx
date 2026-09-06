@@ -2,11 +2,14 @@ import { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { SigmaContainer, useLoadGraph, useSigma, useRegisterEvents } from '@react-sigma/core';
 import Graph from 'graphology';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
-import { EdgeArrowProgram, createEdgeArrowProgram } from 'sigma/rendering';
-import { CANVAS, nodeColor, edgeColor } from '../../theme';
-import { riskVar } from '../../services/format';
-import { NodeTileProgram } from './nodeRenderer';
+import {
+  EdgeArrowProgram, createEdgeArrowProgram, EdgeLineProgram, NodePointProgram,
+} from 'sigma/rendering';
+import { CANVAS, nodeColor } from '../../theme';
+import { riskVar, fmtInt } from '../../services/format';
+import { NodeTileProgram, NodeDiscProgram } from './nodeRenderer';
 import { glyphFor } from './nodeGlyphs';
+import { orient, isFlow, FLOW_COLORS, describeEdge } from './edgeSemantics';
 
 /**
  * Slender, sharp directional arrow program.
@@ -83,22 +86,32 @@ function isSigmaAlive(sigma) {
 
 const SIGMA_SETTINGS = {
   // Square pictogram tiles with the label underneath, as in the Gotham graph
-  // application. See nodeRenderer.js.
+  // application. See nodeRenderer.js. The Shape control swaps the type on
+  // every node; all three are registered up front because Sigma resolves a
+  // node's program by name at render time.
   defaultNodeType: 'tile',
-  // Register both 'tile' and 'def' to prevent Sigma from unregistering 'def'
-  // and triggering an internal program corruption bug.
+  // 'def' is registered too, to prevent Sigma unregistering it and
+  // triggering an internal program corruption bug.
   nodeProgramClasses: {
     tile: NodeTileProgram,
+    disc: NodeDiscProgram,
+    dot: NodePointProgram,
     def: NodeTileProgram,
   },
   nodeHoverProgramClasses: {
     tile: NodeTileProgram,
+    disc: NodeDiscProgram,
+    dot: NodePointProgram,
     def: NodeTileProgram,
   },
-  defaultEdgeType: 'arrow',
+  // Two edge programs: an arrow for a movement of value, a plain line for a
+  // relationship that has no direction. See edgeSemantics.js — an arrowhead
+  // on a co-input edge would claim a payment the heuristic never asserted.
+  defaultEdgeType: 'line',
   edgeProgramClasses: {
     arrow: ArrowProgram,
-    def: ArrowProgram,
+    line: EdgeLineProgram,
+    def: EdgeLineProgram,
   },
   defaultNodeColor: CANVAS.highlight,
   defaultEdgeColor: CANVAS.edge,
@@ -114,7 +127,8 @@ const SIGMA_SETTINGS = {
   // 1,500-node graph draws every address at once.
   labelRenderedSizeThreshold: 9,
   renderEdgeLabels: false,
-  enableEdgeEvents: false,
+  // Hovering a link is how you read a relationship you did not select.
+  enableEdgeEvents: true,
   zIndex: true,
   minCameraRatio: 0.03,
   maxCameraRatio: 12,
@@ -122,7 +136,11 @@ const SIGMA_SETTINGS = {
   // inflating every node until it swallows its neighbours.
   zoomToSizeRatioFunction: (ratio) => Math.sqrt(ratio),
   itemSizesReference: 'positions',
-  minEdgeThickness: 0.35,
+  // Sigma hit-tests edges through a downsized picking buffer, so a sub-pixel
+  // line is not merely hard to hover — it occupies no pixel in that buffer
+  // and cannot be hovered at all. One pixel is the floor for an edge that is
+  // meant to be interactive, and it reads better besides.
+  minEdgeThickness: 1,
   autoRescale: true,
   // Sigma throws if constructed before its container has a measured width,
   // which happens when the canvas mounts ahead of layout. The ResizeObserver
@@ -134,12 +152,49 @@ const SIGMA_SETTINGS = {
 // instead of forcing all of them on.
 const LABEL_ALL_BELOW = 14;
 
+/**
+ * Above this many edges the canvas stops drawing the inferred ones.
+ *
+ * The co-input heuristic connects every pair of wallets spent together, so a
+ * transaction with 174 inputs contributes 15,051 edges on its own. A view of
+ * a thousand nodes arrived carrying seventeen thousand links and rendered as
+ * a solid mat: the tiles were legible, nothing between them was, and the
+ * structure the graph exists to show was the thing hidden.
+ *
+ * Flows are never withheld — they are the evidence. Inferences are context,
+ * and come back the moment there is room for them: when something is
+ * selected, its own neighbourhood is drawn in full whatever the total.
+ */
+const EDGE_BUDGET = 4000;
+
 const DIM_NODE = CANVAS.dimNode;
 const DIM_EDGE = CANVAS.dimEdge;
 const HIGHLIGHT_EDGE = CANVAS.highlight;
 const PATH_EDGE = CANVAS.path;
 
-function GraphLoader({ graphData, onGraphLoaded }) {
+
+/**
+ * How one relationship is drawn.
+ *
+ * A flow gets its direction's colour and an arrowhead; an inference gets a
+ * muted line and none. `amount` rides along so the edge tooltip can say how
+ * much moved without another request.
+ */
+function edgeAttributes(edge) {
+  const flow = isFlow(edge.edge_type);
+  const base = toAlphaColor(FLOW_COLORS[edge.edge_type] || FLOW_COLORS.unknown, flow ? 0.55 : 0.3);
+  return {
+    color: base,
+    baseColor: base,
+    size: flow ? 1.4 : 0.9,
+    edge_type: edge.edge_type,
+    amount: edge.metadata?.amount ?? edge.amount ?? null,
+    flow,
+    type: flow ? 'arrow' : 'line',
+  };
+}
+
+function GraphLoader({ graphData, onGraphLoaded, nodeShape }) {
   const loadGraph = useLoadGraph();
   const sigma = useSigma();
 
@@ -152,7 +207,7 @@ function GraphLoader({ graphData, onGraphLoaded }) {
     (graphData.nodes || []).forEach((node) => {
       if (graph.hasNode(node.id)) return;
       graph.addNode(node.id, {
-        type: 'tile',
+        type: nodeShape || 'tile',
         x: typeof node.x === 'number' ? node.x : Math.random() * 1000 - 500,
         y: typeof node.y === 'number' ? node.y : Math.random() * 1000 - 500,
         size: tileSize(node.size),
@@ -169,17 +224,16 @@ function GraphLoader({ graphData, onGraphLoaded }) {
       });
     });
 
+    const typeOf = (id) => (graph.hasNode(id) ? graph.getNodeAttribute(id, 'node_type') : null);
+
     (graphData.edges || []).forEach((edge) => {
       if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
-      if (graph.hasEdge(edge.id) || graph.hasEdge(edge.source, edge.target)) return;
-      const edgeCol = toAlphaColor(edgeColor(edge.edge_type), 0.38);
-      graph.addEdgeWithKey(edge.id, edge.source, edge.target, {
-        color: edgeCol,
-        baseColor: edgeCol,
-        size: 0.45,
-        edge_type: edge.edge_type,
-        type: 'arrow',
-      });
+      // Re-derived from the node types, so an edge stored the wrong way round
+      // — every edge in the bundled snapshot, which predates the backend
+      // ordering them — still points the way the money moved.
+      const { source, target } = orient(edge, typeOf);
+      if (graph.hasEdge(edge.id) || graph.hasEdge(source, target)) return;
+      graph.addEdgeWithKey(edge.id, source, target, edgeAttributes(edge));
     });
 
     try {
@@ -189,8 +243,25 @@ function GraphLoader({ graphData, onGraphLoaded }) {
       console.warn('loadGraph failed:', err);
     }
     onGraphLoaded?.(graph);
-  }, [graphData, loadGraph, sigma, onGraphLoaded]);
+    // Deliberately not keyed on nodeShape: reloading the graph to change a
+    // shape would throw away the camera and any expansion on the canvas. A
+    // shape change is applied in place by ShapeSwitcher below.
+  }, [graphData, loadGraph, sigma, onGraphLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  return null;
+}
+
+/** Swaps every node's program in place, without reloading the graph. */
+function ShapeSwitcher({ nodeShape }) {
+  const sigma = useSigma();
+  useEffect(() => {
+    if (!isSigmaAlive(sigma)) return;
+    const graph = sigma.getGraph();
+    graph.forEachNode((node) => {
+      graph.setNodeAttribute(node, 'type', nodeShape || 'tile');
+    });
+    try { sigma.refresh(); } catch { /* mid-teardown */ }
+  }, [sigma, nodeShape]);
   return null;
 }
 
@@ -234,7 +305,10 @@ function ResizeHandler() {
  * Hover/selection emphasis, filtering and path highlighting as reducers:
  * pure presentation, no mutation of the underlying graph.
  */
-function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatches }) {
+function Reducers({
+  hovered, selected, filters, pathEdges, pathNodes, searchMatches,
+  hoveredEdge, onDensityChange, graphData,
+}) {
   const sigma = useSigma();
 
   const focusNode = hovered || selected;
@@ -246,12 +320,46 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
     return new Set([focusNode, ...graph.neighbors(focusNode)]);
   }, [focusNode, sigma, searchMatches]);
 
+  // The two nodes a hovered edge joins, so hovering a link reads the same way
+  // hovering a node does.
+  const edgeEnds = useMemo(() => {
+    if (!hoveredEdge || !isSigmaAlive(sigma)) return null;
+    const graph = sigma.getGraph();
+    if (!graph.hasEdge(hoveredEdge)) return null;
+    const [source, target] = graph.extremities(hoveredEdge);
+    return { source, target, set: new Set([source, target]) };
+  }, [hoveredEdge, sigma]);
+
   useEffect(() => {
     if (!isSigmaAlive(sigma)) return;
 
     const typeFilter = filters?.types;
     const minScore = filters?.minScore || 0;
     const hasPath = pathNodes && pathNodes.size > 0;
+
+    const graph = sigma.getGraph();
+    // Over budget, inferred links are held back until there is a reason to
+    // draw them. Reported upward so the canvas can say so rather than let an
+    // investigator read a thinned graph as the whole one.
+    const overBudget = graph.size > EDGE_BUDGET;
+
+    /** One rule, used to draw and to count, so the two cannot disagree. */
+    const withhold = (edge, data, source, target) => {
+      if (!overBudget || data.flow) return false;
+      if (edge === hoveredEdge) return false;
+      if (focusNode && (source === focusNode || target === focusNode)) return false;
+      return true;
+    };
+
+    // Counted here in one pass, not tallied inside the reducer: Sigma runs
+    // the reducer once per render layer, so a counter incremented in it
+    // reported several times the number of edges that exist.
+    let withheld = 0;
+    if (overBudget) {
+      graph.forEachEdge((edge, data, source, target) => {
+        if (withhold(edge, data, source, target)) withheld += 1;
+      });
+    }
 
     sigma.setSetting('nodeReducer', (node, data) => {
       const res = { ...data };
@@ -270,6 +378,19 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
           res.color = PATH_EDGE;
           res.size = data.baseSize * 1.4;
           res.zIndex = 2;
+          res.forceLabel = true;
+        } else {
+          res.color = DIM_NODE;
+          res.label = '';
+          res.zIndex = 0;
+        }
+        return res;
+      }
+
+      if (edgeEnds) {
+        if (edgeEnds.set.has(node)) {
+          res.size = data.baseSize * 1.45;
+          res.zIndex = 3;
           res.forceLabel = true;
         } else {
           res.color = DIM_NODE;
@@ -310,8 +431,15 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
 
     sigma.setSetting('edgeReducer', (edge, data) => {
       const res = { ...data };
-      const graph = sigma.getGraph();
       const [source, target] = graph.extremities(edge);
+
+      // An inferred link on a graph too dense to draw. Kept for a selection's
+      // own neighbourhood and for a hovered edge, which is where the
+      // relationship is actually being read.
+      if (withhold(edge, data, source, target)) {
+        res.hidden = true;
+        return res;
+      }
 
       if (typeFilter) {
         const sType = graph.getNodeAttribute(source, 'node_type');
@@ -345,11 +473,26 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
         return res;
       }
 
+      if (edgeEnds) {
+        if (edge === hoveredEdge) {
+          res.color = HIGHLIGHT_EDGE;
+          res.size = Math.max(1.6, (data.size || 0.6) * 2.6);
+          res.zIndex = 3;
+        } else {
+          res.color = 'rgba(40, 48, 58, 0.12)';
+          res.size = 0.3;
+          res.zIndex = 0;
+        }
+        return res;
+      }
+
       if (neighborSet) {
         if (source === focusNode || target === focusNode) {
-          res.color = 'rgba(76, 144, 240, 0.72)';
-          res.size = 0.75;
-          res.type = 'arrow';
+          // Keep the direction's own colour, brightened: which way the value
+          // went is the point of looking at a neighbourhood.
+          res.color = toAlphaColor(FLOW_COLORS[data.edge_type] || FLOW_COLORS.unknown,
+            data.flow ? 0.95 : 0.5);
+          res.size = data.flow ? 1.1 : 0.6;
           res.zIndex = 1;
         } else {
           res.color = 'rgba(40, 48, 58, 0.12)';
@@ -368,21 +511,64 @@ function Reducers({ hovered, selected, filters, pathEdges, pathNodes, searchMatc
         console.warn('sigma.refresh skipped in Reducers:', err);
       }
     }
-  }, [sigma, hovered, selected, filters, pathEdges, pathNodes, searchMatches, neighborSet, focusNode]);
+
+    onDensityChange?.(overBudget ? { withheld, total: graph.size } : null);
+    // `graphData` is a dependency because the reducers read the loaded graph's
+    // size to decide whether it is over budget. Without it the effect never
+    // re-ran after the graph arrived, so the edge count it judged was the one
+    // from before anything was loaded — always zero, and the notice never
+    // appeared on the graphs that needed it.
+  }, [
+    sigma, hovered, selected, filters, pathEdges, pathNodes, searchMatches,
+    neighborSet, focusNode, edgeEnds, hoveredEdge, onDensityChange, graphData,
+  ]);
 
   return null;
 }
 
-function NodeInteractions({ onNodeClick, onNodeDoubleClick, onNodeHover, onStageClick, onTooltipChange }) {
+function NodeInteractions({
+  onNodeClick, onNodeDoubleClick, onNodeHover, onStageClick, onTooltipChange,
+  onEdgeHover, onNodeContextMenu,
+}) {
   const registerEvents = useRegisterEvents();
   const sigma = useSigma();
   const draggedNodeRef = useRef(null);
   const isDraggingRef = useRef(false);
+  // Which node the pointer is over, so the cursor can go back to 'pointer'
+  // rather than 'grab' when a drag or a pan ends on top of one.
+  const overNodeRef = useRef(false);
+  const panningRef = useRef(false);
 
   useEffect(() => {
     if (!isSigmaAlive(sigma)) return;
     const container = sigma.getContainer();
     if (!container) return;
+
+    /**
+     * The canvas says what the mouse would do here.
+     *
+     *   grabbing  a drag is under way — a node is being moved, or the camera
+     *             is being panned with the button held
+     *   pointer   over a node, which is clickable
+     *   grab      empty canvas, which can be dragged
+     *
+     * It only ever showed grab/grabbing around a node drag, so panning the
+     * camera — the thing done most — left the cursor claiming the canvas was
+     * merely draggable while it was being dragged.
+     */
+    const applyCursor = () => {
+      if (draggedNodeRef.current || panningRef.current) container.style.cursor = 'grabbing';
+      else if (overNodeRef.current) container.style.cursor = 'pointer';
+      else container.style.cursor = 'grab';
+    };
+
+    const handleMouseDown = (e) => {
+      // Left button on empty canvas: Sigma is about to pan the camera.
+      if (e.button === 0 && !draggedNodeRef.current && !overNodeRef.current) {
+        panningRef.current = true;
+        applyCursor();
+      }
+    };
 
     const handleMouseMove = (e) => {
       if (!draggedNodeRef.current) return;
@@ -399,23 +585,37 @@ function NodeInteractions({ onNodeClick, onNodeDoubleClick, onNodeHover, onStage
     };
 
     const handleMouseUp = () => {
+      panningRef.current = false;
       if (draggedNodeRef.current) {
         draggedNodeRef.current = null;
-        container.style.cursor = 'grab';
         setTimeout(() => {
           isDraggingRef.current = false;
         }, 60);
       }
+      applyCursor();
     };
 
+    // Sigma raises rightClickNode itself; this only stops the browser's own
+    // menu covering ours. Off a node the browser menu is left alone — an
+    // application that takes right-click everywhere also takes away
+    // "copy image" and "inspect".
+    const handleContextMenu = (e) => {
+      if (overNodeRef.current) e.preventDefault();
+    };
+
+    container.addEventListener('mousedown', handleMouseDown);
+    container.addEventListener('contextmenu', handleContextMenu);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
 
     registerEvents({
       downNode: (e) => {
+        // Left button only: a right-click must open the menu, not start a
+        // drag that then swallows the click.
+        if (e.event?.original && e.event.original.button !== 0) return;
         draggedNodeRef.current = e.node;
         isDraggingRef.current = false;
-        container.style.cursor = 'grabbing';
+        applyCursor();
         e.preventSigmaDefault();
       },
       clickNode: (e) => {
@@ -427,10 +627,35 @@ function NodeInteractions({ onNodeClick, onNodeDoubleClick, onNodeHover, onStage
         e.preventSigmaDefault();
         onNodeDoubleClick?.(e.node);
       },
+      rightClickNode: (e) => {
+        e.preventSigmaDefault();
+        const orig = e.event?.original;
+        const rect = container.getBoundingClientRect();
+        onNodeContextMenu?.({
+          node: e.node,
+          x: orig ? orig.clientX : e.event.x + rect.left,
+          y: orig ? orig.clientY : e.event.y + rect.top,
+        });
+      },
+      enterEdge: (e) => {
+        const graph = sigma.getGraph();
+        if (!graph.hasEdge(e.edge)) return;
+        const [source, target] = graph.extremities(e.edge);
+        const orig = e.event?.original;
+        const rect = container.getBoundingClientRect();
+        onEdgeHover?.({
+          edge: e.edge,
+          source,
+          target,
+          attrs: graph.getEdgeAttributes(e.edge),
+          x: orig ? orig.clientX : e.event.x + rect.left,
+          y: orig ? orig.clientY : e.event.y + rect.top,
+        });
+      },
+      leaveEdge: () => onEdgeHover?.(null),
       enterNode: (e) => {
-        if (!draggedNodeRef.current) {
-          container.style.cursor = 'pointer';
-        }
+        overNodeRef.current = true;
+        applyCursor();
         onNodeHover?.(e.node);
         const graph = sigma.getGraph();
         if (graph.hasNode(e.node)) {
@@ -448,9 +673,8 @@ function NodeInteractions({ onNodeClick, onNodeDoubleClick, onNodeHover, onStage
         }
       },
       leaveNode: () => {
-        if (!draggedNodeRef.current) {
-          container.style.cursor = 'grab';
-        }
+        overNodeRef.current = false;
+        applyCursor();
         onNodeHover?.(null);
         onTooltipChange?.(null);
       },
@@ -459,13 +683,18 @@ function NodeInteractions({ onNodeClick, onNodeDoubleClick, onNodeHover, onStage
       },
     });
 
-    container.style.cursor = 'grab';
+    applyCursor();
 
     return () => {
+      container.removeEventListener('mousedown', handleMouseDown);
+      container.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [sigma, registerEvents, onNodeClick, onNodeDoubleClick, onNodeHover, onStageClick, onTooltipChange]);
+  }, [
+    sigma, registerEvents, onNodeClick, onNodeDoubleClick, onNodeHover,
+    onStageClick, onTooltipChange, onEdgeHover, onNodeContextMenu,
+  ]);
 
   return null;
 }
@@ -584,7 +813,7 @@ function Controller({ controlRef, onLayoutRunning }) {
           const angle = (i / Math.max(1, fragment.nodes.length)) * Math.PI * 2;
           const radius = 60 + Math.random() * 40;
           graph.addNode(node.id, {
-            type: 'tile',
+            type: graph.order ? (graph.getNodeAttribute(graph.nodes()[0], 'type') || 'tile') : 'tile',
             x: (anchor?.x || 0) + Math.cos(angle) * radius,
             y: (anchor?.y || 0) + Math.sin(angle) * radius,
             size: tileSize(node.size),
@@ -602,17 +831,12 @@ function Controller({ controlRef, onLayoutRunning }) {
           added += 1;
         });
 
+        const typeOf = (id) => (graph.hasNode(id) ? graph.getNodeAttribute(id, 'node_type') : null);
         (fragment.edges || []).forEach((edge) => {
           if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
-          if (graph.hasEdge(edge.source, edge.target)) return;
-          const edgeCol = toAlphaColor(edgeColor(edge.edge_type), 0.38);
-          graph.addEdge(edge.source, edge.target, {
-            color: edgeCol,
-            baseColor: edgeCol,
-            size: 0.45,
-            edge_type: edge.edge_type,
-            type: 'arrow',
-          });
+          const { source, target } = orient(edge, typeOf);
+          if (graph.hasEdge(source, target)) return;
+          graph.addEdge(source, target, edgeAttributes(edge));
         });
 
         if (isSigmaAlive(sigma)) {
@@ -643,20 +867,36 @@ export default function GraphCanvas({
   pathNodes,
   pathEdges,
   searchMatches,
+  nodeShape = 'tile',
   onNodeClick,
   onNodeDoubleClick,
   onNodeHover,
   onStageClick,
   onGraphLoaded,
   onLayoutRunning,
+  onNodeContextMenu,
+  onDensity,
 }) {
   const emptyRef = useRef(new Set());
   const [tooltip, setTooltip] = useState(null);
+  const [edgeHover, setEdgeHover] = useState(null);
+  const [density, setDensity] = useState(null);
+
+  const handleEdgeHover = useCallback((info) => setEdgeHover(info), []);
+  const handleDensity = useCallback((info) => {
+    setDensity((prev) => {
+      if (!info && !prev) return prev;
+      if (info && prev && info.withheld === prev.withheld && info.total === prev.total) return prev;
+      onDensity?.(info);
+      return info;
+    });
+  }, [onDensity]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <SigmaContainer className="graph-canvas" settings={SIGMA_SETTINGS}>
-        <GraphLoader graphData={graphData} onGraphLoaded={onGraphLoaded} />
+        <GraphLoader graphData={graphData} onGraphLoaded={onGraphLoaded} nodeShape={nodeShape} />
+        <ShapeSwitcher nodeShape={nodeShape} />
         <ResizeHandler />
         <Controller controlRef={controlRef} onLayoutRunning={onLayoutRunning} />
         <NodeInteractions
@@ -665,6 +905,8 @@ export default function GraphCanvas({
           onNodeHover={onNodeHover}
           onStageClick={onStageClick}
           onTooltipChange={setTooltip}
+          onEdgeHover={handleEdgeHover}
+          onNodeContextMenu={onNodeContextMenu}
         />
         <Reducers
           hovered={hovered}
@@ -673,8 +915,57 @@ export default function GraphCanvas({
           pathNodes={pathNodes || emptyRef.current}
           pathEdges={pathEdges || emptyRef.current}
           searchMatches={searchMatches || emptyRef.current}
+          hoveredEdge={edgeHover?.edge || null}
+          onDensityChange={handleDensity}
+          graphData={graphData}
         />
       </SigmaContainer>
+
+      {density && (
+        <div className="graph-density-note" role="status">
+          <span className="graph-density-dot" />
+          Showing {fmtInt(density.total - density.withheld)} of {fmtInt(density.total)} links.
+          Co-input and IP relationships are held back at this density — select
+          a node to see its own, or isolate a smaller neighbourhood. Payments
+          are never hidden.
+        </div>
+      )}
+
+      {edgeHover && (
+        <div
+          className="graph-tooltip"
+          style={{
+            position: 'fixed',
+            left: Math.min(window.innerWidth - 280, edgeHover.x + 14),
+            top: Math.min(window.innerHeight - 150, edgeHover.y + 14),
+          }}
+        >
+          <div className="graph-tooltip-header">
+            <span className="graph-tooltip-type">
+              {edgeHover.attrs.flow ? 'payment' : 'inference'}
+            </span>
+          </div>
+          <div className="graph-tooltip-details">
+            <div className="graph-tooltip-row">
+              <span>From</span>
+              <span className="mono">{nodeLabel(edgeHover.source)}</span>
+            </div>
+            <div className="graph-tooltip-row">
+              <span>To</span>
+              <span className="mono">{nodeLabel(edgeHover.target)}</span>
+            </div>
+            {edgeHover.attrs.amount != null && (
+              <div className="graph-tooltip-row">
+                <span>Amount</span>
+                <span className="mono">{Number(edgeHover.attrs.amount).toFixed(8)} BTC</span>
+              </div>
+            )}
+          </div>
+          <div className="graph-tooltip-hint">
+            {describeEdge(edgeHover.attrs.edge_type)}
+          </div>
+        </div>
+      )}
 
       {tooltip && (
         <div

@@ -59,6 +59,91 @@ def _truncate(node_id: str, keep_head: int = 8, keep_tail: int = 6) -> str:
     return f"{node_id[:keep_head]}…{node_id[-keep_tail:]}"
 
 
+# Which relationships are a movement of value, and which are an inference or
+# an observation. Only a flow gets an arrowhead: drawing one on a co-input
+# edge would assert that one wallet paid another, when all the heuristic says
+# is that the two were spent together.
+EDGE_COLORS = {
+    "wallet_input": "#3A6E7A",      # wallet -> transaction (a spend)
+    "wallet_output": "#3A6E55",     # transaction -> wallet (a receipt)
+    "co_input": "#8A5A5F",          # co-ownership inference, undirected
+    "ip_observed_tx": "#4A3F63",    # network observation, undirected
+    "unknown": "#242932",
+}
+
+FLOW_EDGE_TYPES = frozenset({"wallet_input", "wallet_output"})
+
+
+def _serialize_edges(G: nx.Graph) -> list[GraphEdge]:
+    """
+    Edges in the direction the money actually moved.
+
+    The graph is undirected, so `G.edges()` hands back each pair in whatever
+    order the adjacency happens to hold — which meant the client drew an
+    arrowhead pointing whichever way the iteration fell. A wallet's three
+    transactions all looked alike; nothing on screen said which were spends
+    and which were receipts.
+
+    The direction is not stored on the edge, it is implied by the roles the
+    builder recorded: `spent` is the wallet paying into the transaction,
+    `received` is the transaction paying out to it. A change address has both,
+    and becomes two edges, because it really is two flows.
+    """
+    edges: list[GraphEdge] = []
+    counter = 0
+
+    def emit(source, target, edge_type, data, amount=None):
+        nonlocal counter
+        metadata = {k: v for k, v in data.items()
+                    if k not in ("edge_type", "weight", "spent", "received")}
+        if amount is not None:
+            metadata["amount"] = amount
+        edges.append(GraphEdge(
+            id=f"e{counter}",
+            source=source,
+            target=target,
+            edge_type=edge_type,
+            weight=data.get("weight", 1.0),
+            color=EDGE_COLORS.get(edge_type, EDGE_COLORS["unknown"]),
+            metadata={**metadata, "directed": edge_type in FLOW_EDGE_TYPES},
+        ))
+        counter += 1
+
+    for u, v, data in G.edges(data=True):
+        edge_type = data.get("edge_type", "unknown")
+
+        if edge_type in ("wallet_input", "wallet_output", "wallet_change"):
+            # Orient by node type, not by the order the pair came out of the
+            # adjacency: whichever endpoint is the transaction is the one the
+            # spend points at and the receipt points away from.
+            if G.nodes[u].get("node_type") == "transaction":
+                txid, wallet = u, v
+            else:
+                wallet, txid = u, v
+
+            spent = data.get("spent")
+            received = data.get("received")
+            # A graph built before this split carries neither; fall back to
+            # the single `amount` and the type that was recorded.
+            if spent is None and received is None:
+                amount = data.get("amount")
+                if edge_type == "wallet_output":
+                    emit(txid, wallet, "wallet_output", data, amount)
+                else:
+                    emit(wallet, txid, "wallet_input", data, amount)
+                continue
+
+            if spent is not None:
+                emit(wallet, txid, "wallet_input", data, spent)
+            if received is not None:
+                emit(txid, wallet, "wallet_output", data, received)
+            continue
+
+        emit(u, v, edge_type, data, data.get("amount"))
+
+    return edges
+
+
 def graph_to_json(
     G: nx.Graph,
     layout: str = "spring",
@@ -130,30 +215,7 @@ def graph_to_json(
             metadata=metadata,
         ))
 
-    # Build edges
-    edges = []
-    for i, (u, v, data) in enumerate(G.edges(data=True)):
-        edge_type = data.get("edge_type", "unknown")
-        color = "#242932"
-        if edge_type == "co_input":
-            color = "#8A5A5F"     # co-ownership inference
-        elif edge_type == "wallet_input":
-            color = "#3A6E7A"
-        elif edge_type == "wallet_output":
-            color = "#3A6E55"
-        elif edge_type == "ip_observed_tx":
-            color = "#4A3F63"
-
-        edges.append(GraphEdge(
-            id=f"e{i}",
-            source=u,
-            target=v,
-            edge_type=edge_type,
-            weight=data.get("weight", 1.0),
-            color=color,
-            metadata={k: v for k, v in data.items()
-                      if k not in ("edge_type", "weight")},
-        ))
+    edges = _serialize_edges(G)
 
     # Build cluster map
     clusters: dict[int, list[str]] = {}
@@ -178,6 +240,65 @@ def graph_to_json(
     return GraphData(nodes=nodes, edges=edges, clusters=clusters, stats=stats)
 
 
+
+def _clustered_circular_layout(G: nx.Graph) -> dict:
+    """
+    Nodes arranged as one ring per cluster, the rings laid out on a circle.
+
+    `nx.circular_layout` puts every node on a single ring in graph order. At
+    the sizes this tool loads that is not a layout — a thousand tiles form the
+    rim and every edge crosses the middle, so the canvas is a ring around a
+    solid disc of lines and nothing can be read off it. Worse, the ordering is
+    arbitrary, so adjacency on the rim means nothing: two neighbours on screen
+    are not related.
+
+    Grouping by cluster makes the arrangement carry information. Each cluster
+    gets its own small ring, the rings are placed around a larger circle, and
+    a cluster's internal edges stay short and local instead of crossing the
+    whole canvas. Unclustered nodes go to an outer ring of their own rather
+    than being scattered through the others.
+    """
+    nodes = list(G.nodes())
+    if not nodes:
+        return {}
+
+    groups: dict[object, list[str]] = {}
+    for node_id, data in G.nodes(data=True):
+        groups.setdefault(data.get("cluster_id"), []).append(node_id)
+
+    # Largest clusters first, so the biggest structures get the outer, roomier
+    # positions; the unclustered remainder is placed last.
+    unclustered = groups.pop(None, [])
+    ordered = sorted(groups.items(), key=lambda kv: -len(kv[1]))
+    if unclustered:
+        ordered.append((None, unclustered))
+
+    if len(ordered) <= 1:
+        # One cluster (or none): a single ring is the honest answer.
+        return nx.circular_layout(G)
+
+    positions: dict[str, tuple[float, float]] = {}
+    ring_count = len(ordered)
+    for index, (_cluster_id, members) in enumerate(ordered):
+        angle = 2 * math.pi * index / ring_count
+        # Ring centres on the unit circle, scaled so the biggest cluster's
+        # own ring still fits between its neighbours.
+        cx = math.cos(angle) * 0.72
+        cy = math.sin(angle) * 0.72
+        # A ring's radius grows with its membership but is capped, so one huge
+        # cluster cannot swallow the others.
+        radius = min(0.26, 0.02 + 0.02 * math.sqrt(len(members)))
+        if len(members) == 1:
+            positions[members[0]] = (cx, cy)
+            continue
+        for j, member in enumerate(members):
+            theta = 2 * math.pi * j / len(members)
+            positions[member] = (cx + math.cos(theta) * radius,
+                                 cy + math.sin(theta) * radius)
+
+    return positions
+
+
 def _compute_layout(G: nx.Graph, layout: str) -> dict:
     """Compute node positions using the specified layout algorithm."""
     if G.number_of_nodes() == 0:
@@ -193,7 +314,7 @@ def _compute_layout(G: nx.Graph, layout: str) -> dict:
             else:
                 return nx.spring_layout(G, seed=42)
         elif layout == "circular":
-            return nx.circular_layout(G)
+            return _clustered_circular_layout(G)
         else:
             # Random layout with some structure
             return nx.spring_layout(G, k=2.0, iterations=20, seed=42)

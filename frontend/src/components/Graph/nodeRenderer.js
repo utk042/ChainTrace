@@ -96,4 +96,53 @@ export const NodeTileProgram = createNodeImageProgram({
   drawHover,
 });
 
+/**
+ * The same pictogram, inscribed in a circle.
+ *
+ * Square tiles read well when there is space between them. Packed together —
+ * a cluster of co-spending wallets, a hub's immediate neighbourhood — their
+ * corners touch and the field turns into a single block of colour. Discs keep
+ * a visible gap at the same spacing, so the shape of the neighbourhood
+ * survives.
+ */
+export const NodeDiscProgram = createNodeImageProgram({
+  drawingMode: 'background',
+  keepWithinCircle: true,
+  padding: 0.3,
+  size: { mode: 'force', value: 96 },
+  objectFit: 'contain',
+  correctCentering: true,
+  drawLabel,
+  drawHover: drawCircleHover,
+});
+
+/** The hover ring for a round node: a circle, not a rectangle. */
+function drawCircleHover(context, data, settings) {
+  const size = settings.labelSize;
+  context.strokeStyle = CANVAS.highlight;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.arc(data.x, data.y, data.size + 2, 0, Math.PI * 2);
+  context.stroke();
+
+  if (!data.label) return;
+  context.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
+  const width = context.measureText(data.label).width;
+  const boxWidth = width + 12;
+  const boxHeight = size + 8;
+  const boxX = data.x - boxWidth / 2;
+  const boxY = data.y + data.size + 4;
+
+  context.fillStyle = CANVAS.hoverBg;
+  context.strokeStyle = CANVAS.hoverBorder;
+  context.lineWidth = 1;
+  context.beginPath();
+  context.rect(boxX, boxY, boxWidth, boxHeight);
+  context.fill();
+  context.stroke();
+
+  context.fillStyle = CANVAS.hoverText;
+  context.fillText(data.label, boxX + 6, boxY + size + 1);
+}
+
 export { drawLabel as drawNodeLabel, drawHover as drawNodeHover };

@@ -2472,6 +2472,105 @@ button.stat-tile:hover { background: var(--bg-well); }
 .graph-zoom button:last-child { border-bottom: none; }
 .graph-zoom button:hover { background: var(--bg-control); color: var(--text-primary); }
 
+/* ─── Graph: density notice, notes, plain summary ────────────────── */
+
+/* Said out loud, because a thinned graph and a sparse one look identical and
+   an investigator must never mistake one for the other. */
+.graph-density-note {
+  position: absolute;
+  left: var(--space-md);
+  bottom: 46px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  max-width: 420px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-chrome);
+  border: 1px solid var(--risk-elevated);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  z-index: var(--z-float);
+  pointer-events: none;
+}
+
+.graph-density-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--risk-elevated);
+  flex-shrink: 0;
+}
+
+.node-context-menu { min-width: 220px; }
+
+.plain-summary {
+  padding: 0 var(--space-md) var(--space-sm);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.plain-summary p { margin: 0 0 var(--space-sm); }
+
+.plain-summary .section-label { padding: var(--space-sm) 0 var(--space-xs); }
+
+.plain-summary-caveat {
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.notes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md) var(--space-md);
+}
+
+.note-item {
+  padding: var(--space-sm);
+  background: var(--bg-well);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.note-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: 4px;
+}
+
+.note-item-meta {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.note-item-body {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.note-draft { height: auto; padding: var(--space-sm); resize: vertical; line-height: 1.5; }
+
+.note-actions {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.note-actions .note-author { flex: 1; min-width: 0; }
+
 /* ─── Modal (the keyboard reference) ─────────────────────────────── */
 
 .modal-backdrop {

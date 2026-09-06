@@ -269,7 +269,7 @@ a connected machine and upload the file instead.
 ```bash
 cd frontend
 npm run check:icons     # icon geometry — runs as part of `npm run build`
-npm run test:unit       # the local filter/sort/paging rules, no browser needed
+npm run test:unit       # query rules and graph edge semantics, no browser needed
 npm run build
 npm run test:offline    # the offline-first acceptance test, in a real browser
 npm run test:ui         # menus, dropdowns, shortcuts and chart hover
@@ -282,11 +282,14 @@ python tests/airgap.py  # the backend with every non-loopback socket refused
 dropdown is the app's own and not the operating system's, that a menu paints
 above the icon rail rather than under it, that the keyboard reference opens
 from every view, that the search hint names the modifier this platform
-actually uses, and that a chart tooltip stays inside its panel.
+actually uses, that a chart tooltip stays inside its panel, and that the
+graph's shape control and right-click menu work.
 
-`test:unit` checks `services/localQuery.js` against the routers it mirrors:
+`test:unit` checks `services/localQuery.js` against the routers it mirrors —
 that the filters mean what the SQL means, and that a view cut locally never
-claims to describe more rows than the device is holding.
+claims to describe more rows than the device is holding — and
+`components/Graph/edgeSemantics.js`, which decides which way an edge points
+and whether it may carry an arrowhead at all.
 
 `test:offline` drives Chromium through the whole promise: it loads the app,
 waits for the service worker to take control, stores data through
@@ -401,6 +404,54 @@ Figures drawn from the page currently loaded — the facet histograms beside a
 result list — are labelled *this page*, never presented as a census of the
 whole table.
 
+### Reading the graph
+
+**Direction.** The entity graph is undirected, because Louvain clustering,
+the embeddings and risk propagation all need it that way. Direction is
+therefore never stored on an edge — it is implied by the relationship, and
+re-derived when the graph is serialised and again when it is drawn:
+
+| Relationship | Points | Meaning |
+| --- | --- | --- |
+| `wallet_input` | wallet → transaction | the wallet paid into it |
+| `wallet_output` | transaction → wallet | it paid out to the wallet |
+| `co_input` | neither | two wallets spent together — an inference |
+| `ip_observed_tx` | neither | an address was seen carrying the transaction |
+
+Only the first two carry an arrowhead, and they do not share a colour. An
+arrow on a co-input edge would assert that one wallet paid another, when all
+the common-input-ownership heuristic says is that the two were spent in the
+same transaction. The inspector splits a wallet's links the same way — money
+in, money out, and related-but-no-value-moved — because "what came in and
+what went out" is the first question anyone asks of a wallet.
+
+A wallet that funds a transaction *and* takes change back from it is two
+flows, and is drawn as two.
+
+**Density.** The co-input heuristic connects every pair of wallets spent
+together, so a transaction with 180 inputs contributes 16,110 edges by
+itself. Above a budget the canvas stops drawing the inferred ones and says so
+on screen, naming how many are held back; payments are never hidden, and a
+selected node's own links are always drawn. Without that a thousand-node view
+arrived as a solid mat with the structure it exists to show buried in it.
+
+**Shape and layout.** *Organise* picks the server-computed layout;
+*Circular* groups the ring by cluster rather than putting every node on one
+circle, which at these sizes is a rim around a disc of edges and says
+nothing. The shape control next to it swaps the node program: pictogram tiles
+read best with room between them, discs keep a gap where square corners would
+touch, and plain dots stay distinct at densities where any glyph smears.
+
+**Notes.** Right-click a node, or open *Notes & findings* in the inspector,
+to record what you concluded and why. Notes are stored in the case database,
+not the browser: one kept in local storage is lost to a cleared cache,
+invisible to a second analyst on the same data, and missing from an export.
+
+**Plain language.** Every entity record carries a summary in sentences —
+what the entity did, what moved in and out, and why it was flagged — derived
+from the same figures shown beside it, so the two cannot disagree. It
+describes behaviour, not intent, and says so.
+
 ### Graph Explorer
 
 | Action | How |
@@ -447,6 +498,7 @@ Prototype/
 │   │   │   └── real_fetcher.py   # Real Bitcoin data via Blockstream's Esplora API
 │   │   ├── graph/
 │   │   │   ├── builder.py           # Entity graph construction
+│   │   │   ├── explain.py           # Plain-language entity summaries
 │   │   │   ├── clustering.py        # Louvain + Node2Vec-based cluster refinement
 │   │   │   ├── patterns.py          # Peeling-chain / CoinJoin / consolidation-hub detectors
 │   │   │   └── risk_propagation.py  # BFS risk propagation from seed wallets

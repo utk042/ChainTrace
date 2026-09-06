@@ -48,6 +48,14 @@ export async function registerServiceWorker() {
     return null;
   }
 
+  // A blocked or policy-restricted worker resolves without a registration
+  // rather than rejecting. Reading `.waiting` off that threw during startup
+  // and took the rest of this function — including the update flow — with it.
+  if (!registration) {
+    console.warn('Service worker registration returned nothing; the app will not work offline.');
+    return null;
+  }
+
   // Already superseded when the page loaded.
   if (registration.waiting && navigator.serviceWorker.controller) announceUpdate();
 

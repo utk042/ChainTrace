@@ -25,13 +25,20 @@
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from './support/server.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'dist');
 const PORT = 8901;
 const BASE = `http://127.0.0.1:${PORT}`;
+
+/** The snapshot's most-connected entity: certain to be drawn, and centred by ?q=. */
+const GRAPH_PROBE_NODE = JSON.parse(
+  readFileSync(join(ROOT, 'src/demo/snapshot.json'), 'utf8'),
+).graph.nodes.reduce((best, n) => (
+  (n.metadata?.degree || 0) > (best.metadata?.degree || 0) ? n : best
+)).id;
 
 const LAUNCH = process.env.CHROMIUM_EXECUTABLE
   ? { executablePath: process.env.CHROMIUM_EXECUTABLE }
@@ -144,6 +151,52 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForTimeout(800);
   check(await page.locator('.select-option').count() === 0, 'Enter picks an option and closes it');
+
+  // ── The Graph Explorer's new controls ─────────────────────────────
+  // Opened on a specific entity, so the canvas centres it and the pointer
+  // has a node to find rather than a sampled guess.
+  await page.goto(`${BASE}/graph?q=${encodeURIComponent(GRAPH_PROBE_NODE)}`,
+    { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(8000);
+
+  // Node shape sits next to the layout control and swaps in place.
+  const shape = page.locator('.select-trigger').nth(1);
+  await shape.click();
+  await page.waitForTimeout(300);
+  const shapes = (await page.locator('.select-option').allTextContents()).map((t) => t.trim());
+  check(shapes.length === 3 && shapes.includes('Plain dot'),
+    'the node shape control offers every registered program', shapes.join(', '));
+  await page.getByRole('option', { name: 'Plain dot' }).click();
+  await page.waitForTimeout(1500);
+  check((await shape.textContent()).includes('Plain dot'), 'choosing a node shape applies it');
+  check(await page.evaluate(() => document.querySelectorAll('canvas').length) > 0,
+    'the canvas survives a shape change');
+
+  // Right-clicking a node opens the app's menu, not the browser's.
+  const canvasBox = await page.locator('canvas').first().boundingBox();
+  let opened = false;
+  // The selected node is centred, so the centre is the reliable target; the
+  // rest are a small hedge against the camera settling a pixel or two off.
+  for (const [fx, fy] of [[0.5, 0.5], [0.5, 0.49], [0.49, 0.5], [0.51, 0.51]]) {
+    await page.mouse.move(canvasBox.x + canvasBox.width * fx, canvasBox.y + canvasBox.height * fy);
+    await page.waitForTimeout(300);
+    await page.mouse.click(canvasBox.x + canvasBox.width * fx, canvasBox.y + canvasBox.height * fy,
+      { button: 'right' });
+    await page.waitForTimeout(500);
+    if (await page.locator('.node-context-menu').count()) { opened = true; break; }
+    await page.keyboard.press('Escape');
+  }
+  if (opened) {
+    const items = await page.locator('.node-context-menu .menu-item-label').allTextContents();
+    check(items.length >= 5 && items.some((i) => /note/i.test(i)),
+      'right-click offers the node actions, including notes', items.join(', '));
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    check(await page.locator('.node-context-menu').count() === 0,
+      'the context menu closes on Escape');
+  } else {
+    check(false, 'right-click opens the node menu', 'no node found at the centred selection');
+  }
 
   // ── The timeline tooltip stays inside its own panel ───────────────
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });

@@ -13,6 +13,52 @@ from app.logging_config import get_logger
 logger = get_logger("app.graph.builder")
 
 
+def _link_wallet_tx(G: nx.Graph, address: str, txid: str,
+                    spent: float = None, received: float = None) -> None:
+    """
+    Record one direction of a wallet's involvement in a transaction.
+
+    The entity graph is undirected — Louvain clustering, the embeddings and
+    risk propagation all need it that way — so `add_edge(addr, txid)` and
+    `add_edge(txid, addr)` are the same edge and the second call overwrites
+    the first's attributes. That silently destroyed the most basic fact about
+    a wallet: whether money went in or out. A change address, which appears
+    as both an input and an output of the same transaction, kept only
+    whichever role was written last, and every other wallet-to-transaction
+    edge carried a direction that depended on iteration order rather than on
+    the payment.
+
+    Both amounts are kept on the one edge instead. `spent` is the wallet
+    paying into the transaction, `received` is the transaction paying out to
+    it; a change address has both. The serializer turns each present amount
+    into its own directed edge for the client, so a wallet that funded a
+    transaction and took change back is drawn as the two flows it is.
+    """
+    data = G.get_edge_data(address, txid)
+    if data is None:
+        G.add_edge(address, txid, edge_type="wallet_input" if spent is not None
+                   else "wallet_output")
+        data = G.get_edge_data(address, txid)
+
+    if spent is not None:
+        data["spent"] = round(data.get("spent", 0.0) + spent, 8)
+    if received is not None:
+        data["received"] = round(data.get("received", 0.0) + received, 8)
+
+    has_spent = data.get("spent") is not None
+    has_received = data.get("received") is not None
+    if has_spent and has_received:
+        data["edge_type"] = "wallet_change"
+    elif has_spent:
+        data["edge_type"] = "wallet_input"
+    else:
+        data["edge_type"] = "wallet_output"
+
+    # `amount` predates the split and several callers still read it; keep it
+    # as the larger of the two so nothing that used it regresses to zero.
+    data["amount"] = max(data.get("spent") or 0.0, data.get("received") or 0.0)
+
+
 def build_entity_graph(con: duckdb.DuckDBPyConnection = None) -> nx.Graph:
     """
     Build the full entity graph from DuckDB transaction data.
@@ -64,7 +110,7 @@ def build_entity_graph(con: duckdb.DuckDBPyConnection = None) -> nx.Graph:
                     G.nodes[addr]["tx_count"] = G.nodes[addr].get("tx_count", 0) + 1
                     amt = input_amts[i] if i < len(input_amts) else 0.0
                     G.nodes[addr]["total_sent"] = G.nodes[addr].get("total_sent", 0.0) + amt
-                    G.add_edge(addr, txid, edge_type="wallet_input", amount=amt)
+                    _link_wallet_tx(G, addr, txid, spent=amt)
 
                 # Co-input heuristic: wallets in the same TX inputs likely belong
                 # to the same entity (common-input-ownership heuristic)
@@ -83,7 +129,7 @@ def build_entity_graph(con: duckdb.DuckDBPyConnection = None) -> nx.Graph:
                     G.nodes[addr]["tx_count"] = G.nodes[addr].get("tx_count", 0) + 1
                     amt = output_amts[i] if i < len(output_amts) else 0.0
                     G.nodes[addr]["total_received"] = G.nodes[addr].get("total_received", 0.0) + amt
-                    G.add_edge(txid, addr, edge_type="wallet_output", amount=amt)
+                    _link_wallet_tx(G, addr, txid, received=amt)
 
         return G
 
