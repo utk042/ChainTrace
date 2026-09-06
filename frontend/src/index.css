@@ -174,6 +174,10 @@
   --z-float: 40;
   --z-panel: 60;
   --z-chrome: 120;
+  /* The rail overlays the workspace when it expands on hover, so it sits
+     above panels and page chrome — but below any menu, which is drawn into
+     <body> and must cover everything. */
+  --z-rail: 140;
   --z-dropdown: 200;
   --z-modal: 400;
   --z-toast: 500;
@@ -264,7 +268,10 @@ code, pre, .mono { font-family: var(--font-mono); }
 
 .gt-app {
   display: grid;
-  grid-template-rows: var(--titlebar-h) var(--menubar-h) minmax(0, 1fr);
+  /* Title bar, menu bar, workspace, status bar. The status bar is a fixed
+     row rather than page content: it reports the connection state, and a
+     reading that scrolls out of view is one an operator stops checking. */
+  grid-template-rows: var(--titlebar-h) var(--menubar-h) minmax(0, 1fr) var(--statusbar-h);
   height: 100%;
   overflow: hidden;
   background: var(--bg-app);
@@ -530,7 +537,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   width: var(--rail-w);
   height: 100%;
   flex-shrink: 0;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-rail);
 }
 
 .rail {
@@ -549,7 +556,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-rail);
   transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1) 0s, box-shadow 0.2s ease 0s;
   white-space: nowrap;
 }
@@ -1014,6 +1021,93 @@ code, pre, .mono { font-family: var(--font-mono); }
 }
 
 .select option { background: var(--bg-well); color: var(--text-primary); }
+
+/* ─── Custom select (components/ui/Select.jsx) ───────────────────── */
+/*
+   The trigger keeps the .select / .tool-select look, so a closed control is
+   indistinguishable from the native one it replaced. It only has to stop
+   painting the CSS arrow, since the component draws a real chevron.
+*/
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  text-align: left;
+  font-family: inherit;
+}
+
+/* The base classes paint an arrow with a background gradient and reserve
+   padding for it. The component draws a real chevron, so both have to go —
+   named against each base class because .tool-select is defined further down
+   the file and would otherwise win on source order, leaving two arrows. */
+.select.select-trigger,
+.tool-select.select-trigger {
+  background-image: none;
+  padding-right: var(--space-sm);
+}
+
+.select-trigger .select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-trigger > svg { flex-shrink: 0; color: var(--text-tertiary); }
+
+.select-trigger.open { border-color: var(--border-focus); }
+
+.select-trigger:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.select-menu { padding: var(--space-xs) 0; }
+
+.select-list { outline: none; }
+
+.select-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 5px var(--space-md) 5px var(--space-sm);
+  background: none;
+  border: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Hover and keyboard focus are the same state, so a pointer and the arrow
+   keys never disagree about which row is about to be chosen. It matches
+   .menu-item's highlight, because this is one of the app's menus. */
+.select-option.active:not(:disabled) {
+  background: var(--accent-strong);
+  color: var(--text-on-accent);
+}
+
+.select-option.active:not(:disabled) .select-option-check { color: var(--text-on-accent); }
+
+.select-option.selected { color: var(--text-primary); }
+
+.select-option:disabled { color: var(--text-muted); }
+
+.select-option:disabled { cursor: not-allowed; }
+
+.select-option-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.select-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 textarea.input { height: auto; padding: var(--space-sm); resize: vertical; line-height: 1.5; }
 
@@ -2377,6 +2471,236 @@ button.stat-tile:hover { background: var(--bg-well); }
 
 .graph-zoom button:last-child { border-bottom: none; }
 .graph-zoom button:hover { background: var(--bg-control); color: var(--text-primary); }
+
+/* ─── Risk score vs evidence confidence ──────────────────────────── */
+/*
+   Two different readings, so two different treatments. The score is coloured
+   by risk tier; the evidence grade is not, because a LOW-evidence CRITICAL
+   is exactly the case an investigator must be able to spot at a glance.
+*/
+.badge.evidence-high {
+  background: rgba(63, 178, 127, 0.16);
+  color: #7fd6ab;
+  border: 1px solid rgba(63, 178, 127, 0.4);
+}
+
+.badge.evidence-medium {
+  background: rgba(224, 136, 60, 0.14);
+  color: #e0a86c;
+  border: 1px solid rgba(224, 136, 60, 0.36);
+}
+
+.badge.evidence-low {
+  background: rgba(143, 153, 168, 0.12);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+}
+
+.badge.muted { background: none; color: var(--text-muted); border: 1px solid var(--border-soft); }
+
+.assessment {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md) var(--space-sm);
+}
+
+.assessment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.assessment-label {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.assessment-value { font-size: var(--text-md); font-weight: 600; }
+
+.assessment-caveat {
+  margin: 0;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-tertiary);
+}
+
+.evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md) var(--space-md);
+}
+
+.evidence-factor {
+  padding: var(--space-sm);
+  background: var(--bg-well);
+  border-left: 2px solid var(--border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* A pattern matched on the graph can be checked by hand; a statistical
+   outlier cannot. The border says which kind you are looking at. */
+.evidence-factor.kind-structural { border-left-color: #3fb27f; }
+.evidence-factor.kind-watchlist { border-left-color: var(--risk-elevated); }
+.evidence-factor.kind-statistical { border-left-color: var(--text-muted); }
+
+.evidence-factor-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.evidence-factor-name { font-size: var(--text-sm); color: var(--text-primary); font-weight: 500; }
+
+.evidence-factor-value { font-size: var(--text-sm); color: var(--text-secondary); }
+
+.evidence-factor-note {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+/* ─── Graph: density notice, notes, plain summary ────────────────── */
+
+/* Said out loud, because a thinned graph and a sparse one look identical and
+   an investigator must never mistake one for the other. */
+.graph-density-note {
+  position: absolute;
+  left: var(--space-md);
+  bottom: 46px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  max-width: 420px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-chrome);
+  border: 1px solid var(--risk-elevated);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  z-index: var(--z-float);
+  pointer-events: none;
+}
+
+.graph-density-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--risk-elevated);
+  flex-shrink: 0;
+}
+
+.node-context-menu { min-width: 220px; }
+
+.plain-summary {
+  padding: 0 var(--space-md) var(--space-sm);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.plain-summary p { margin: 0 0 var(--space-sm); }
+
+.plain-summary .section-label { padding: var(--space-sm) 0 var(--space-xs); }
+
+.plain-summary-caveat {
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.notes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md) var(--space-md);
+}
+
+.note-item {
+  padding: var(--space-sm);
+  background: var(--bg-well);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.note-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: 4px;
+}
+
+.note-item-meta {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.note-item-body {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.note-draft { height: auto; padding: var(--space-sm); resize: vertical; line-height: 1.5; }
+
+.note-actions {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.note-actions .note-author { flex: 1; min-width: 0; }
+
+/* ─── Modal (the keyboard reference) ─────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: rgba(0, 0, 0, 0.55);
+  z-index: var(--z-modal);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(80vh, 640px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.modal-body {
+  padding: var(--space-md);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.shortcut-section { display: flex; flex-direction: column; gap: var(--space-sm); }
 
 .shortcut-list { display: flex; flex-direction: column; gap: 5px; }
 

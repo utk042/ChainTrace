@@ -12,7 +12,9 @@ from app.database import get_db_readonly
 from app.graph.builder import (
     get_subgraph, get_graph_stats, build_entity_graph, apply_scores_from_db,
 )
-from app.graph.serializer import graph_to_json, NODE_COLORS, RISK_COLORS, _node_size, _truncate
+from app.graph.serializer import (
+    graph_to_json, _serialize_edges, NODE_COLORS, RISK_COLORS, _node_size, _truncate,
+)
 from app.ml.trainer import get_entity_graph, get_clusters
 
 from app.logging_config import get_logger
@@ -91,6 +93,42 @@ def _empty_payload(reason: str) -> dict:
         "ready": False,
         "reason": reason,
     }
+
+
+def _flows(G: nx.Graph, entity_id: str, other: str, edge: dict):
+    """
+    (direction, amount) for one link, from `entity_id`'s point of view.
+
+    'out'  — this entity paid into the transaction
+    'in'   — the transaction paid this entity
+    'none' — a co-input inference or an IP observation, where no value moved
+
+    A change address funds a transaction *and* takes change back from it, so
+    one edge can yield both.
+    """
+    edge_type = edge.get("edge_type", "unknown")
+    if edge_type not in ("wallet_input", "wallet_output", "wallet_change"):
+        return [("none", edge.get("amount"))]
+
+    entity_is_tx = G.nodes[entity_id].get("node_type") == "transaction"
+    spent = edge.get("spent")
+    received = edge.get("received")
+
+    if spent is None and received is None:
+        # Pre-split graph: the single amount and the recorded type are all
+        # there is to go on.
+        amount = edge.get("amount")
+        outward = (edge_type == "wallet_input") != entity_is_tx
+        return [("out" if outward else "in", amount)]
+
+    out = []
+    if spent is not None:
+        # The wallet spending into the transaction: out of the wallet, in to
+        # the transaction.
+        out.append(("in" if entity_is_tx else "out", spent))
+    if received is not None:
+        out.append(("out" if entity_is_tx else "in", received))
+    return out
 
 
 @router.get("/data")
@@ -193,16 +231,11 @@ def expand_entity(entity_id: str, limit: int = Query(60, ge=1, le=5_000)):
             "metadata": {"degree": degree},
         })
 
-    edges = [
-        {
-            "id": f"x{i}",
-            "source": u,
-            "target": v,
-            "edge_type": d.get("edge_type", "unknown"),
-            "weight": d.get("weight", 1.0),
-        }
-        for i, (u, v, d) in enumerate(sub.edges(data=True))
-    ]
+    # Through the serializer, so an expanded fragment carries the same
+    # directions as the graph it is merged into. Built by hand here, it
+    # emitted whatever order the adjacency held and a spend and a receipt
+    # arrived indistinguishable.
+    edges = [e.model_dump() for e in _serialize_edges(sub)]
 
     return {
         "nodes": nodes,
@@ -295,19 +328,24 @@ def node_detail(entity_id: str):
         nt = G.nodes[n].get("node_type", "unknown")
         neighbor_types[nt] = neighbor_types.get(nt, 0) + 1
 
-    # Highest-degree links first.
+    # Highest-degree links first, each labelled with which way value moved.
+    # Without a direction the panel listed a wallet's transactions as an
+    # undifferentiated set, and the one question an investigator opens it to
+    # answer — what came in, what went out — could not be read off it.
     counterparties = []
     for n in sorted(neighbors, key=lambda x: -G.degree(x))[:8]:
         edge = G.get_edge_data(entity_id, n) or {}
-        counterparties.append({
-            "id": n,
-            "node_type": G.nodes[n].get("node_type", "unknown"),
-            "edge_type": edge.get("edge_type", "unknown"),
-            "amount": edge.get("amount"),
-            "risk_tier": G.nodes[n].get("risk_tier"),
-            "anomaly_score": G.nodes[n].get("anomaly_score"),
-            "degree": G.degree(n),
-        })
+        for direction, amount in _flows(G, entity_id, n, edge):
+            counterparties.append({
+                "id": n,
+                "node_type": G.nodes[n].get("node_type", "unknown"),
+                "edge_type": edge.get("edge_type", "unknown"),
+                "direction": direction,
+                "amount": amount,
+                "risk_tier": G.nodes[n].get("risk_tier"),
+                "anomaly_score": G.nodes[n].get("anomaly_score"),
+                "degree": G.degree(n),
+            })
 
     detail = {
         "found": True,
@@ -382,13 +420,16 @@ def node_detail(entity_id: str):
                     }
 
             alert_rows = con.execute("""
-                SELECT alert_id, risk_tier, confidence, model, description, status
+                SELECT alert_id, risk_tier, confidence, model, description, status,
+                       evidence_confidence, evidence_rationale
                 FROM alerts WHERE entity_id = ?
                 ORDER BY confidence DESC LIMIT 5
             """, (entity_id,)).fetchall()
             detail["alerts"] = [
-                {"alert_id": a[0], "risk_tier": a[1], "confidence": a[2],
-                 "model": a[3], "description": a[4], "status": a[5]}
+                {"alert_id": a[0], "risk_tier": a[1],
+                 "risk_score": a[2], "confidence": a[2],
+                 "model": a[3], "description": a[4], "status": a[5],
+                 "evidence_confidence": a[6], "evidence_rationale": a[7]}
                 for a in alert_rows
             ]
     except Exception as exc:
@@ -397,6 +438,16 @@ def node_detail(entity_id: str):
         # unremarkable wallet looks like.
         logger.exception("node_detail enrichment failed for %s", entity_id)
         detail["enrichment_error"] = f"{type(exc).__name__}: {exc}"
+
+    # The same record in sentences, for a reader who does not already know
+    # what fan-in degree or a round-amount ratio is. Derived from `detail`
+    # itself, so it cannot drift from the figures beside it.
+    try:
+        from app.graph.explain import explain_entity
+        detail["summary"] = explain_entity(detail)
+    except Exception:
+        logger.exception("summary generation failed for %s", entity_id)
+        detail["summary"] = None
 
     return detail
 

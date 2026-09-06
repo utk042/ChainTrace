@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Query
+from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import get_db
 from app.logging_config import get_logger, log_tail, log_file_path
@@ -360,10 +361,28 @@ async def fetch_real_data(
             max_transactions=max_transactions, max_blocks=max_blocks,
         ))
     except EsploraError as e:
-        return {"error": f"Could not reach Blockstream's API: {e}"}
+        # 502, not 200. This is the one endpoint that cannot work without
+        # outbound internet, and on an air-gapped machine it is *expected* to
+        # fail — but a failure answered with 200 OK is invisible to every
+        # client that checks the status line rather than sniffing the body,
+        # which is how a monitoring check reports an air-gapped install as
+        # healthy while this returns nothing.
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": f"Could not reach Blockstream's API: {e}",
+                "detail": "This is the only feature that needs outbound internet. "
+                          "On an offline machine, fetch the data elsewhere and use "
+                          "Upload, or generate a synthetic dataset instead.",
+            },
+        )
 
     if not records:
-        return {"error": "No usable transactions found in the scanned blocks. Try increasing max_blocks."}
+        return JSONResponse(
+            status_code=502,
+            content={"error": "No usable transactions found in the scanned blocks. "
+                              "Try increasing max_blocks."},
+        )
 
     import sys
     if str(settings.BASE_DIR) not in sys.path:
@@ -428,7 +447,7 @@ def _execute_pipeline(file_path: str, run_id: str, clear_existing: bool):
         # Step 3: Validate
         stage = "validate"
         run.begin(stage, f"Validating {len(raw_records)} records...")
-        valid_records, errors = validate_records(iter(raw_records))
+        valid_records, errors, schema_report = validate_records(iter(raw_records))
         if not valid_records:
             sample = "; ".join(str(e) for e in errors[:3])
             raise ValueError(
@@ -438,7 +457,20 @@ def _execute_pipeline(file_path: str, run_id: str, clear_existing: bool):
         if errors:
             logger.warning("%s record(s) rejected during validation; first: %s",
                            len(errors), errors[0], extra={"run_id": run_id, "stage": stage})
-        run.finish(stage, f"{len(valid_records)} valid, {len(errors)} rejected")
+
+        # Said out loud, and in the run log an operator can read afterwards.
+        # A column the schema does not know is dropped either way; the point
+        # is that nobody finds out about it a week later.
+        summary_line = f"{len(valid_records)} valid, {len(errors)} rejected"
+        if schema_report.get("unknown_fields"):
+            logger.warning("Unrecognised column(s) in %s: %s. They were not stored.",
+                           Path(file_path).name,
+                           ", ".join(schema_report["unknown_fields"]),
+                           extra={"run_id": run_id, "stage": stage})
+            summary_line += (f" — {len(schema_report['unknown_fields'])} unrecognised "
+                             f"column(s) not stored: "
+                             f"{', '.join(schema_report['unknown_fields'])}")
+        run.finish(stage, summary_line)
 
         # Step 4: Enrich with GeoIP
         stage = "enrich"

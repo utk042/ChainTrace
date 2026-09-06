@@ -16,6 +16,7 @@ import Collapse from '../components/ui/Collapse';
 import CopyButton from '../components/ui/CopyButton';
 import { HistogramFacet } from '../components/ui/Histogram';
 import { Loading, Empty, Failed, Notice } from '../components/ui/States';
+import Select from '../components/ui/Select';
 import { useSession } from '../state/SessionProvider';
 
 const PAGE_SIZE = 25;
@@ -79,6 +80,10 @@ export default function Wallets() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
+  // Set when an offline read was answered by re-slicing stored rows that do
+  // not cover the whole result set; the table must say so rather than let a
+  // short answer read as a complete one.
+  const [partial, setPartial] = useState(null);
   const narrow = useIsNarrow();
   const [showFilters, setShowFilters] = useState(!narrow);
 
@@ -118,9 +123,14 @@ export default function Wallets() {
       const res = await getWallets(query);
       setRows(res.data.wallets || []);
       setTotal(res.data.total || 0);
+      setPartial(res.data.offline_partial ? {
+        rows: res.data.offline_rows_available,
+        backendTotal: res.data.offline_backend_total,
+      } : null);
     } catch (e) {
       setRows([]);
       setTotal(0);
+      setPartial(null);
       setError(e.response
         ? `The backend returned ${e.response.status} for /api/wallets.`
         : 'Could not reach the backend, and no stored copy of this query is available offline.');
@@ -323,6 +333,17 @@ export default function Wallets() {
         </Menu>
       </div>
 
+      {partial && (
+        <div style={{ padding: 'var(--space-sm) var(--space-md) 0' }}>
+          <Notice kind="warn">
+            Offline: this view was filtered, sorted and paged on this device
+            from the {fmtInt(partial.rows)} wallets stored here. The backend last
+            reported {fmtInt(partial.backendTotal)} in this table, so anything
+            outside the stored rows is not on screen and the counts above
+            describe the stored rows only.
+          </Notice>
+        </div>
+      )}
       {note && (
         <div style={{ padding: 'var(--space-sm) var(--space-md) 0' }}>
           <Notice
@@ -401,24 +422,21 @@ export default function Wallets() {
 
             <div className="filter-block">
               <div className="filter-block-title">Order by</div>
-              <select
-                className="select"
+              <Select
                 value={`${sort.by}:${sort.order}`}
-                onChange={(e) => {
-                  const [by, order] = e.target.value.split(':');
-                  setSort({ by, order });
-                }}
-                aria-label="Sort order"
-              >
-                <option value="anomaly_score:desc">Anomaly score, highest first</option>
-                <option value="tx_count:desc">Transaction count, highest first</option>
-                <option value="total_received:desc">Received, largest first</option>
-                <option value="total_sent:desc">Sent, largest first</option>
-                <option value="fan_out_degree:desc">Fan out, highest first</option>
-                <option value="velocity_1h:desc">Velocity, highest first</option>
-                <option value="darknet_proximity_score:desc">Watchlist proximity</option>
-                <option value="age_days:asc">Newest wallets first</option>
-              </select>
+                onChange={(v) => { const [by, order] = v.split(':'); setSort({ by, order }); }}
+                ariaLabel="Sort order"
+                options={[
+                  { value: 'anomaly_score:desc', label: 'Anomaly score, highest first' },
+                  { value: 'tx_count:desc', label: 'Transaction count, highest first' },
+                  { value: 'total_received:desc', label: 'Received, largest first' },
+                  { value: 'total_sent:desc', label: 'Sent, largest first' },
+                  { value: 'fan_out_degree:desc', label: 'Fan out, highest first' },
+                  { value: 'velocity_1h:desc', label: 'Velocity, highest first' },
+                  { value: 'darknet_proximity_score:desc', label: 'Watchlist proximity' },
+                  { value: 'age_days:asc', label: 'Newest wallets first' },
+                ]}
+              />
             </div>
 
             <div className="section-label">

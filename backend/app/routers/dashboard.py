@@ -140,11 +140,12 @@ def get_risk_distribution():
 
 @router.get("/top-alerts")
 def get_top_alerts(limit: int = Query(5, ge=1, le=200)):
-    """Get top N alerts by confidence."""
+    """Get top N alerts by risk score."""
     with get_db_readonly() as con:
         rows = con.execute("""
             SELECT alert_id, entity_id, entity_type, risk_tier,
-                   confidence, model, description, shap_values, timestamp, status
+                   confidence, model, description, shap_values, timestamp, status,
+                   evidence_confidence
             FROM alerts
             ORDER BY confidence DESC
             LIMIT ?
@@ -156,12 +157,14 @@ def get_top_alerts(limit: int = Query(5, ge=1, le=200)):
                 "entity_id": r[1],
                 "entity_type": r[2],
                 "risk_tier": r[3],
+                "risk_score": r[4],
                 "confidence": r[4],
                 "model": r[5],
                 "description": r[6],
                 "shap_values": r[7],
                 "timestamp": str(r[8]),
                 "status": r[9],
+                "evidence_confidence": r[10],
             }
             for r in rows
         ]

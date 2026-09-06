@@ -134,7 +134,19 @@ launcher. A new deployment is picked up in the background and offered as a
 **2. Backend results are stored as you read them.** Every `GET` the app makes
 is cached, and served back when the backend cannot be reached. Before leaving
 a connected network, **Settings → Offline & Data → Save for offline** pulls the
-dashboard, alerts, wallets, transactions and graph down in one pass.
+dashboard, graph and the alerts, wallets and transactions *tables* down in one
+pass.
+
+Stored responses are keyed by their exact URL, which on its own is too strict
+to be useful: opening page 2, sorting a column or ticking a filter is a
+different URL, so it missed the cache and the page reported that nothing was
+stored — on a device that was holding every row involved. So the tables are
+saved whole, and when a read finds no exact match the app re-runs the filter,
+sort and pagination locally over the stored rows
+(`frontend/src/services/localQuery.js`, shared with snapshot mode so the two
+behave identically). When the stored rows cannot cover a view — a table larger
+than what was saved — the page says so above the results instead of letting a
+short answer read as a complete one.
 
 Stored data is never passed off as live. Each cached response carries the time
 it was fetched, and while the app is serving one, the banner reads *"showing
@@ -158,9 +170,9 @@ MaxMind database if one is present and degrades to a deterministic fallback
 if not.
 
 The only feature that needs a network is **Ingest → Fetch Real Blockchain
-Data**, which calls Blockstream's public API by definition. It fails with a
-clear message on an air-gapped machine; fetch the data on a connected machine
-and upload the file instead.
+Data**, which calls Blockstream's public API by definition. It answers `502`
+with a clear message on an air-gapped machine; fetch the data on a connected
+machine and upload the file instead.
 
 > Service workers are only allowed on HTTPS or `localhost`. Served over plain
 > HTTP from another host, layers 1 and 2 are unavailable — the Settings panel
@@ -181,20 +193,113 @@ with no server, no install and no network. It carries no service worker —
 left to cache. (The PNG/JSON export buttons need a real browser context;
 everything else works.)
 
+### The whole stack offline
+
+The section above is about the *frontend* surviving a lost connection. The
+backend has a separate question to answer: can the whole product run on a
+machine that has never had internet at all?
+
+It can, and that is checked rather than asserted:
+
+```bash
+cd backend
+python tests/airgap.py          # or CT_LIGHT_MODE=true python tests/airgap.py
+```
+
+The test does not simulate being offline. It replaces `socket.connect`,
+`connect_ex` and `getaddrinfo` with versions that refuse every non-loopback
+address *before importing the app*, then drives the real thing through them:
+generate a dataset, run the full pipeline (parse, validate, GeoIP enrich,
+load, analyse), read every endpoint the frontend calls including the
+entity-level ones, write a setting, and serve the built frontend. Any
+outbound connection attempt is recorded and fails the run, naming the host —
+including one made by a library while its module body executes. That last
+part is the point: a dependency that phones home on import, or a model that
+downloads weights on first use, works perfectly on a developer's laptop and
+fails on the machine this tool exists for.
+
+**One process, one port, no network.** When `frontend/dist` exists the
+backend serves it from its own origin, so there is no second server, no
+nginx, no CORS and no `VITE_API_URL` to configure:
+
+```bash
+cd frontend && npm run build
+cd ../backend && uvicorn app.main:app --port 8000
+# -> http://127.0.0.1:8000  — API and interface, one process
+```
+
+Set `CT_FRONTEND_DIST` to serve a build from elsewhere, or point it at a path
+that does not exist to go back to API-only. `/api/...` is never answered with
+the HTML shell: an unmatched API path returns a JSON 404, because an SPA
+rewrite that returns `index.html` with a 200 is exactly what the frontend's
+health check exists to catch.
+
+**Installing without a network.** Running offline is not the same as
+*installing* offline — `pip install` and `npm ci` both reach out. On a
+connected machine:
+
+```bash
+scripts/bundle-offline.sh              # light profile, ~115 MB
+scripts/bundle-offline.sh --full       # with PyTorch + PyG + SHAP, ~2.5 GB
+```
+
+That produces `dist-offline/`: the built frontend, every Python dependency
+resolved *and built* into a wheel, the backend source, and an installer. Copy
+it to the air-gapped machine and:
+
+```bash
+./install.sh    # creates venv/ from the bundled wheels, with --no-index
+./run.sh        # http://127.0.0.1:8000
+```
+
+`--no-index` is deliberate: pip must not be able to fall back to PyPI, so a
+missing wheel fails on the machine that can still fix it rather than on the
+day the target is disconnected. Wheels are specific to an OS, CPU
+architecture and Python minor version — build the bundle on a machine that
+matches the target. `install.sh` checks the Python version and says so
+instead of failing halfway through.
+
+The only feature that needs the internet is **Ingest → Fetch Real Blockchain
+Data**, which calls Blockstream's public API by definition. Offline it
+answers `502` with an explanation naming the alternatives; fetch the data on
+a connected machine and upload the file instead.
+
 ### Checks
 
 ```bash
 cd frontend
 npm run check:icons     # icon geometry — runs as part of `npm run build`
+npm run test:unit       # query rules and graph edge semantics, no browser needed
 npm run build
 npm run test:offline    # the offline-first acceptance test, in a real browser
+npm run test:ui         # menus, dropdowns, shortcuts and chart hover
+
+cd ../backend
+python tests/airgap.py         # every non-loopback socket refused
+python tests/ingest_schema.py  # the complete required dataset, CSV/JSON/XML
+python tests/confidence.py     # risk score and evidence confidence stay separate
 ```
+
+`test:ui` covers the chrome that only misbehaves under a pointer: that a
+dropdown is the app's own and not the operating system's, that a menu paints
+above the icon rail rather than under it, that the keyboard reference opens
+from every view, that the search hint names the modifier this platform
+actually uses, that a chart tooltip stays inside its panel, and that the
+graph's shape control and right-click menu work.
+
+`test:unit` checks `services/localQuery.js` against the routers it mirrors —
+that the filters mean what the SQL means, and that a view cut locally never
+claims to describe more rows than the device is holding — and
+`components/Graph/edgeSemantics.js`, which decides which way an edge points
+and whether it may carry an arrowhead at all.
 
 `test:offline` drives Chromium through the whole promise: it loads the app,
 waits for the service worker to take control, stores data through
 **Settings → Offline & Data**, **kills the server**, then re-loads all seven
 routes and asserts they render from storage, are labelled as stored rather
-than live, and go back to live when the server returns.
+than live, and go back to live when the server returns. It also pages and
+filters the wallets table while offline, which is the case exact-URL cache
+keys used to turn into an error page.
 
 The server is killed rather than using Playwright's `context.setOffline()`,
 which only cuts the page's own network and not the fetches the service worker
@@ -301,6 +406,124 @@ Figures drawn from the page currently loaded — the facet histograms beside a
 result list — are labelled *this page*, never presented as a census of the
 whole table.
 
+### Risk score is not a probability
+
+Two different questions get asked about a flagged wallet, and the system
+used to answer one while labelling it as the other.
+
+| | What it means | Range |
+| --- | --- | --- |
+| **Risk score** | How far this wallet's behaviour sits from the typical wallet in this dataset | 0-100 |
+| **Evidence confidence** | How much independent support the finding has | HIGH / MEDIUM / LOW |
+
+The alerts column holding the score has been named `confidence` since the
+first schema, and the interface printed it as *"95.0% confidence"* — an
+unsupervised outlier distance rendered as a probability that a wallet is
+criminal. It cannot be that: the autoencoder is trained on unlabelled data
+and has never been shown an offence. Nothing in the interface says
+"confidence" against a number any more, the CSV export column is headed
+**Risk Score (0-100)**, and the sentence explaining what the number is not
+travels with it from the API rather than being re-worded per screen.
+
+Evidence confidence is graded separately, in `backend/app/ml/confidence.py`:
+
+- **Structural detectors** — peel chains, CoinJoin-like mixing, consolidation
+  hubs — are deterministic pattern matches on the transaction graph. They can
+  be checked by hand and shown to someone.
+- **Watchlist proximity** is operator-supplied ground truth propagated
+  outward. One hop is a direct transaction with a designated wallet; by three
+  hops most of a connected graph qualifies and it says almost nothing.
+- **The autoencoder** says "unlike the others", which is a reason to look
+  rather than a finding. Alone it never grades above LOW, whatever it scores.
+
+HIGH needs two independent structural patterns, or one plus a direct
+watchlist link. The point of separating them is visible in the data: on the
+bundled 5,000-transaction sample a wallet scoring **100.0** grades **LOW**
+(a statistical outlier with nothing behind it) while one scoring **85.0**
+grades **HIGH** (a peel chain and a mixer interaction agreeing). Ranking by
+score alone puts them the wrong way round.
+
+Every alert carries the factors the grade rests on, each naming what kind of
+evidence it is and — where the heuristic has innocent explanations — saying
+so. A peel chain is also what ordinary wallet software does with change;
+mixing is legal and has real privacy uses; proximity is not participation.
+
+### Input schema
+
+The ingest accepts this dataset, in CSV, JSON or XML:
+
+```
+timestamp   src_ip   dst_ip   src_port   dst_port   txid
+input_addresses[]    output_addresses[]
+input_amounts[]      output_amounts[]
+fee         script_type         geo_country      asn
+```
+
+`geo_country` and `asn` are the attribution supplied *with* the record and
+are kept distinct from `geo_country_src`/`geo_country_dst` and
+`asn_src`/`asn_dst`, which the GeoIP step infers. A supplied value seeds the
+source endpoint and is never overwritten by a lookup: the operator's own
+value is evidence, the lookup's is inference, and a forensic record has to
+keep those apart.
+
+A column the schema does not recognise is **reported**, not discarded in
+silence — the run log and the validate stage both name it. Until that
+existed, a conforming file could validate with "0 errors" while two of its
+columns vanished, which is the worst failure mode available: it looks like
+it worked.
+
+`npm run` has no part in proving this. `python tests/ingest_schema.py`
+drives the real parser, validator, database and API and checks that all
+fourteen fields survive the round trip in every format.
+
+### Reading the graph
+
+**Direction.** The entity graph is undirected, because Louvain clustering,
+the embeddings and risk propagation all need it that way. Direction is
+therefore never stored on an edge — it is implied by the relationship, and
+re-derived when the graph is serialised and again when it is drawn:
+
+| Relationship | Points | Meaning |
+| --- | --- | --- |
+| `wallet_input` | wallet → transaction | the wallet paid into it |
+| `wallet_output` | transaction → wallet | it paid out to the wallet |
+| `co_input` | neither | two wallets spent together — an inference |
+| `ip_observed_tx` | neither | an address was seen carrying the transaction |
+
+Only the first two carry an arrowhead, and they do not share a colour. An
+arrow on a co-input edge would assert that one wallet paid another, when all
+the common-input-ownership heuristic says is that the two were spent in the
+same transaction. The inspector splits a wallet's links the same way — money
+in, money out, and related-but-no-value-moved — because "what came in and
+what went out" is the first question anyone asks of a wallet.
+
+A wallet that funds a transaction *and* takes change back from it is two
+flows, and is drawn as two.
+
+**Density.** The co-input heuristic connects every pair of wallets spent
+together, so a transaction with 180 inputs contributes 16,110 edges by
+itself. Above a budget the canvas stops drawing the inferred ones and says so
+on screen, naming how many are held back; payments are never hidden, and a
+selected node's own links are always drawn. Without that a thousand-node view
+arrived as a solid mat with the structure it exists to show buried in it.
+
+**Shape and layout.** *Organise* picks the server-computed layout;
+*Circular* groups the ring by cluster rather than putting every node on one
+circle, which at these sizes is a rim around a disc of edges and says
+nothing. The shape control next to it swaps the node program: pictogram tiles
+read best with room between them, discs keep a gap where square corners would
+touch, and plain dots stay distinct at densities where any glyph smears.
+
+**Notes.** Right-click a node, or open *Notes & findings* in the inspector,
+to record what you concluded and why. Notes are stored in the case database,
+not the browser: one kept in local storage is lost to a cleared cache,
+invisible to a second analyst on the same data, and missing from an export.
+
+**Plain language.** Every entity record carries a summary in sentences —
+what the entity did, what moved in and out, and why it was flagged — derived
+from the same figures shown beside it, so the two cannot disagree. It
+describes behaviour, not intent, and says so.
+
 ### Graph Explorer
 
 | Action | How |
@@ -333,6 +556,9 @@ stay small so they read as connective tissue.
 ```
 Prototype/
 ├── docker-compose.yml
+├── scripts/
+│   └── bundle-offline.sh        # Builds an install bundle for a machine
+│                                # with no internet (wheels + built frontend)
 ├── backend/
 │   ├── app/
 │   │   ├── main.py             # FastAPI entry
@@ -344,10 +570,12 @@ Prototype/
 │   │   │   └── real_fetcher.py   # Real Bitcoin data via Blockstream's Esplora API
 │   │   ├── graph/
 │   │   │   ├── builder.py           # Entity graph construction
+│   │   │   ├── explain.py           # Plain-language entity summaries
 │   │   │   ├── clustering.py        # Louvain + Node2Vec-based cluster refinement
 │   │   │   ├── patterns.py          # Peeling-chain / CoinJoin / consolidation-hub detectors
 │   │   │   └── risk_propagation.py  # BFS risk propagation from seed wallets
 │   │   ├── ml/
+│   │   │   ├── confidence.py     # Evidence confidence, graded apart from the score
 │   │   │   ├── autoencoder.py    # Picks the backend below for this deployment
 │   │   │   ├── torch_backend.py  # PyTorch autoencoder (full profile)
 │   │   │   ├── light.py          # PCA linear autoencoder (light profile)
@@ -356,6 +584,11 @@ Prototype/
 │   │   └── routers/             # FastAPI endpoints
 │   ├── requirements.txt         # Full dependency set
 │   ├── requirements-light.txt   # Without torch / PyG / SHAP (~120 MB)
+│   ├── tests/
+│   │   ├── airgap.py            # Runs the whole backend with every
+│   │   │                        # non-loopback socket refused
+│   │   ├── ingest_schema.py     # The complete required input schema
+│   │   └── confidence.py        # Score and evidence confidence stay apart
 │   └── scripts/
 │       └── generate_synthetic.py
 └── frontend/
@@ -386,8 +619,13 @@ Prototype/
         └── services/
             ├── api.js        # API client + cache-provenance tracking
             ├── commands.js   # Menu-bar command registry (pages register what they can do)
+            ├── platform.js   # Which modifier key this machine actually uses
             ├── format.js     # One definition each for identifier, figure and date display
             ├── demoAdapter.js  # Serves the bundled snapshot through axios
+            ├── localQuery.js # Filter/sort/page rules mirroring the routers,
+            │                 # shared by snapshot mode and the offline path
+            ├── offlineFallback.js # Re-cuts a view from stored rows when a
+            │                      # read cannot reach the backend
             └── offline.js    # Service-worker lifecycle and cache controls
 ```
 

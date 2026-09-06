@@ -4,9 +4,12 @@ import TitleBar from './components/Layout/TitleBar';
 import MenuBar from './components/Layout/MenuBar';
 import Rail from './components/Layout/Rail';
 import ConnectionBanner from './components/Layout/ConnectionBanner';
+import StatusBar from './components/Layout/StatusBar';
+import ShortcutsDialog from './components/Layout/ShortcutsDialog';
 import UpdatePrompt from './components/Layout/UpdatePrompt';
 import ErrorBoundary from './components/ErrorBoundary';
 import { SessionProvider, useSession } from './state/SessionProvider';
+import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { Loading } from './components/ui/States';
 
 // Code-split so a page downloads only what it uses
@@ -39,6 +42,7 @@ const Router = import.meta.env.VITE_HASH_ROUTER === 'true' ? HashRouter : Browse
  */
 function Shell() {
   const { tabs, activeTabId } = useSession();
+  useGlobalShortcuts();
 
   return (
     <div className="gt-app">
@@ -73,6 +77,8 @@ function Shell() {
           </ErrorBoundary>
         </main>
       </div>
+      <StatusBar />
+      <ShortcutsDialog />
       <UpdatePrompt />
     </div>
   );

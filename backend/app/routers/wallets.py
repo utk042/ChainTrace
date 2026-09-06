@@ -146,7 +146,8 @@ def get_wallet_detail(address: str):
 
         # Get associated alerts
         alerts = con.execute("""
-            SELECT alert_id, risk_tier, confidence, description, model
+            SELECT alert_id, risk_tier, confidence, description, model,
+                   evidence_confidence
             FROM alerts WHERE entity_id = ?
         """, [address]).fetchall()
 
@@ -190,7 +191,8 @@ def get_wallet_detail(address: str):
         "recent_transactions": recent_txs,
         "similar_wallets": similar_wallets,
         "alerts": [
-            {"alert_id": a[0], "risk_tier": a[1], "confidence": a[2], "description": a[3], "model": a[4]}
+            {"alert_id": a[0], "risk_tier": a[1], "risk_score": a[2], "confidence": a[2],
+             "description": a[3], "model": a[4], "evidence_confidence": a[5]}
             for a in alerts
         ],
     }

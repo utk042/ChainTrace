@@ -2,13 +2,15 @@
 """
 ChainTrace Forensics — Synthetic Bitcoin Transaction Dataset Generator
 
-Generates a realistic synthetic dataset with 6 embedded anomaly patterns:
+Generates a realistic synthetic dataset with 7 embedded anomaly patterns:
   1. Normal P2P transfers (~85%)
   2. Peeling chains (~4%)
   3. Mixer/Tumbler patterns (~3%)
   4. Velocity spikes (~3%)
   5. Round-amount structuring (~3%)
   6. Darknet proximity (~2%)
+  7. Layered laundering (~1%) — a peel chain running into a mixer through
+     shared wallets, so a single wallet carries more than one finding
 
 Usage:
     python generate_synthetic.py --count 5000 --output data/sample/transactions.csv
@@ -188,6 +190,70 @@ def generate_mixer_pattern(fan_in: int = 15, fan_out: int = 10) -> list[dict]:
     return records
 
 
+def generate_layered_laundering(chain_length: int = 5, fan_out: int = 6) -> list[dict]:
+    """
+    A peel chain with a mixing transaction hanging off its middle.
+
+    Every other pattern here mints fresh wallets, so no wallet ever exhibits
+    more than one of them and nothing in the dataset is corroborated by a
+    second, independent finding. That is not what laundering looks like —
+    placement, layering and integration are stages of one operation run
+    through overlapping addresses — and it left the evidence grading with no
+    HIGH-confidence case to find, since a HIGH grade means precisely "more
+    than one independent check agrees".
+
+    The mix is attached to a wallet in the *middle* of the chain, not its
+    end. A terminal wallet only ever receives, and the peel detector grades
+    depth from wallets that spend onward, so a wallet at the end of the chain
+    reads as a recipient rather than a participant.
+    """
+    records = []
+    base_time = random_timestamp()
+    src_ip = random_ip()
+    current_wallet = random_wallet("1Lay")
+    current_amount = random_amount(4.0, 12.0)
+    chain_wallets = [current_wallet]
+
+    # Stage one: peel the funds down a chain.
+    for i in range(chain_length):
+        peel_amount = round(current_amount * random.uniform(0.02, 0.08), 8)
+        change = round(current_amount - peel_amount - random.uniform(0.00001, 0.0005), 8)
+        next_wallet = random_wallet("1Lay")
+        fee = round(current_amount - peel_amount - change, 8)
+        records.append(_build_record(
+            [current_wallet], [random_wallet(), next_wallet],
+            [current_amount], [peel_amount, max(0.0001, change)],
+            max(0.00001, fee), "layered_laundering",
+            timestamp=base_time + timedelta(minutes=random.randint(5, 25) * (i + 1)),
+            src_ip=src_ip,
+        ))
+        current_wallet = next_wallet
+        current_amount = max(0.01, change)
+        chain_wallets.append(next_wallet)
+
+    # Stage two: one wallet from the middle of that chain — which therefore
+    # both receives and spends onward, and so reads as chain depth >= 2 — is
+    # also an input to a single transaction paying equal amounts to several
+    # outputs. That is the shape the CoinJoin detector matches: 3+ near-equal
+    # outputs drawn from 3+ distinct inputs.
+    mixer_participant = chain_wallets[len(chain_wallets) // 2]
+    co_inputs = [mixer_participant] + [random_wallet() for _ in range(3)]
+    pooled = round(random_amount(2.0, 6.0), 8)
+    slice_amount = round((pooled * 0.97) / fan_out, 8)
+    fee = round(pooled - slice_amount * fan_out, 8)
+    records.append(_build_record(
+        co_inputs,
+        [random_wallet() for _ in range(fan_out)],
+        [round(pooled / len(co_inputs), 8)] * len(co_inputs),
+        [slice_amount] * fan_out,
+        max(0.00001, fee), "layered_laundering",
+        timestamp=base_time + timedelta(hours=3, minutes=random.randint(1, 50)),
+        src_ip=src_ip, country=random.choice(HIGH_RISK_COUNTRIES),
+    ))
+
+    return records
+
+
 def generate_velocity_spike(wallet: str = None, count: int = 60) -> list[dict]:
     """Velocity spike: single wallet bursts 50+ tx in <1hr."""
     records = []
@@ -297,7 +363,13 @@ def generate_dataset(total: int = 5000, seed: int = 42) -> list[dict]:
     n_velocity = int(total * 0.03)
     n_round = int(total * 0.03)
     n_darknet = int(total * 0.02)
-    n_normal = total - n_peeling - n_mixer - n_velocity - n_round - n_darknet
+    # Cases where one operation shows more than one technique, which is what
+    # a real laundering chain looks like and what a corroborated finding
+    # needs. Deliberately rare — if most wallets were multiply flagged the
+    # evidence grading would mean nothing.
+    n_layered = int(total * 0.01)
+    n_normal = (total - n_peeling - n_mixer - n_velocity - n_round
+                - n_darknet - n_layered)
 
     # Generate normal transactions
     for _ in range(n_normal):
@@ -317,6 +389,11 @@ def generate_dataset(total: int = 5000, seed: int = 42) -> list[dict]:
     spikes_needed = max(1, n_velocity // 60)
     for _ in range(spikes_needed):
         records.extend(generate_velocity_spike(count=60))
+
+    # Layered cases: a peel chain running into a mixer through shared wallets
+    layered_needed = max(1, n_layered // 16)
+    for _ in range(layered_needed):
+        records.extend(generate_layered_laundering(chain_length=5, fan_out=6))
 
     # Generate round-amount transactions
     for _ in range(n_round):

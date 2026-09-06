@@ -6,13 +6,17 @@ import NodeInspector from '../components/Graph/NodeInspector';
 import Icon from '../components/Icon';
 import Tabs from '../components/ui/Tabs';
 import Menu, { MenuItem, MenuSeparator, MenuHeading } from '../components/ui/Menu';
+import Select from '../components/ui/Select';
+import NodeContextMenu from '../components/Graph/NodeContextMenu';
 import { HistogramGroup, HistogramRow } from '../components/ui/Histogram';
 import { Empty } from '../components/ui/States';
 import { useResizablePane } from '../hooks/useResizablePane';
 import { useCommands } from '../services/commands';
+import { useSession } from '../state/SessionProvider';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { TYPE_LEGEND, RISK_LEGEND, RISK_COLORS, TYPE_COLORS } from '../theme';
 import { shortId, fmtInt } from '../services/format';
+import { NODE_SHAPES } from '../components/Graph/edgeSemantics';
 import { saveUrl, saveBlob, fileStamp } from '../services/download';
 import {
   getGraphData, getSubgraph, searchGraph,
@@ -55,6 +59,7 @@ export default function GraphExplorer() {
   // A ?q= on the URL is how global search hands an identifier to this page,
   // and it makes a search shareable as a link.
   const [searchParams, setSearchParams] = useSearchParams();
+  const { openShortcuts } = useSession();
   const [query, setQuery] = useState(() => searchParams.get('q') || '');
   const [results, setResults] = useState([]);
   const [searchMatches, setSearchMatches] = useState(new Set());
@@ -62,7 +67,13 @@ export default function GraphExplorer() {
   const [types, setTypes] = useState(DEFAULT_TYPES);
   const [minScore, setMinScore] = useState(0);
   const [layout, setLayout] = useState('spring');
-  const [panel, setPanel] = useState(null);      // 'filters' | 'path' | 'keys' | null
+  // Which node program draws the canvas. A view of a few hundred reads best
+  // as pictogram tiles; a few thousand only reads as dots.
+  const [nodeShape, setNodeShape] = useState('tile');
+  const [contextMenu, setContextMenu] = useState(null);
+  // Reported by the canvas when it is withholding inferred links.
+  const [density, setDensity] = useState(null);
+  const [panel, setPanel] = useState(null);      // 'filters' | 'path' | null
   const [sideTab, setSideTab] = useState('summary');
   // Below this width the side panel overlays the canvas, so it must not
   // start open — it would hide the graph on load.
@@ -265,7 +276,13 @@ export default function GraphExplorer() {
     setLoading(true);
     try {
       const res = await getSubgraph(nodeId, hops);
-      if (!res.data?.nodes?.length) { flash('No subgraph available for that entity.'); return; }
+      if (!res.data?.nodes?.length) {
+        // The router says why — not in the graph, nothing ingested, filtered
+        // out. Dropping that for a generic line is what sent operators
+        // looking for a bug in the canvas.
+        flash(res.data?.reason || `No subgraph is available for ${shortId(nodeId)}.`);
+        return;
+      }
       setIsolatedNode(nodeId);
       focusAfterLoad.current = nodeId;
       setGraphData(res.data);
@@ -367,7 +384,6 @@ export default function GraphExplorer() {
     'panel.detail': () => { setShowSide(true); setSideTab('selection'); },
     'graph.fit': () => control.current.fit?.(),
     'graph.relayout': () => control.current.relayout?.(),
-    'help.shortcuts': () => setPanel((p) => (p === 'keys' ? null : 'keys')),
     ...(selected ? {
       'graph.expand': () => handleExpand(selected),
       'graph.path': () => startPath(selected),
@@ -463,15 +479,22 @@ export default function GraphExplorer() {
         <div className="tool-group">
           <span className="tool-group-label">Organise</span>
           <div className="tool-group-items">
-            <select
+            <Select
               className="tool-select"
               value={layout}
-              onChange={(e) => { setLayout(e.target.value); load({ layout: e.target.value }); }}
+              onChange={(v) => { setLayout(v); load({ layout: v }); }}
               title="Layout computed on the server"
-              aria-label="Server layout"
-            >
-              {LAYOUTS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
-            </select>
+              ariaLabel="Server layout"
+              options={LAYOUTS.map((l) => ({ value: l.key, label: l.label }))}
+            />
+            <Select
+              className="tool-select"
+              value={nodeShape}
+              onChange={setNodeShape}
+              title="How nodes are drawn"
+              ariaLabel="Node shape"
+              options={NODE_SHAPES.map((sh) => ({ value: sh.key, label: sh.label }))}
+            />
             <button
               className="tool-btn"
               onClick={() => control.current.relayout?.()}
@@ -543,9 +566,9 @@ export default function GraphExplorer() {
               <Icon name="panelRight" size={13} />
             </button>
             <button
-              className={`tool-btn${panel === 'keys' ? ' active' : ''}`}
-              onClick={() => setPanel(panel === 'keys' ? null : 'keys')}
-              title="Keyboard shortcuts"
+              className="tool-btn"
+              onClick={openShortcuts}
+              title="Keyboard shortcuts (?)"
             >
               <Icon name="info" size={13} />
             </button>
@@ -582,6 +605,9 @@ export default function GraphExplorer() {
         <GraphCanvas
           graphData={graphData}
           controlRef={control}
+          nodeShape={nodeShape}
+          onDensity={setDensity}
+          onNodeContextMenu={(info) => { selectNode(info.node, { center: false }); setContextMenu(info); }}
           hovered={hovered}
           selected={selected}
           filters={filters}
@@ -821,34 +847,6 @@ export default function GraphExplorer() {
         )}
 
         {/* Shortcuts */}
-        {panel === 'keys' && (
-          <div className="graph-float">
-            <header className="panel-header">
-              <span className="panel-title"><Icon name="info" size={12} /> Keyboard shortcuts</span>
-              <span className="panel-header-actions">
-                <button className="icon-btn" onClick={() => setPanel(null)} aria-label="Close">
-                  <Icon name="close" size={12} />
-                </button>
-              </span>
-            </header>
-            <div className="graph-float-body">
-              <div className="shortcut-list">
-                {[
-                  ['/', 'Focus find'],
-                  ['F', 'Fit graph to view'],
-                  ['R', 'Reset view and filters'],
-                  ['L', 'Re-run force layout'],
-                  ['E', 'Expand selected node'],
-                  ['C', 'Centre selected node'],
-                  ['+ / −', 'Zoom in / out'],
-                  ['Esc', 'Clear selection'],
-                ].map(([k, d]) => (
-                  <div key={k}><kbd>{k}</kbd><span>{d}</span></div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Canvas furniture */}
         <div className="graph-footer">
@@ -889,6 +887,28 @@ export default function GraphExplorer() {
         </div>
 
         {toast && <div className="toast" role="status">{toast}</div>}
+
+        {contextMenu && (
+          <NodeContextMenu
+            info={contextMenu}
+            onClose={() => setContextMenu(null)}
+            actions={[
+              { icon: 'crosshair', label: 'Centre on this node',
+                run: () => control.current.focusOn?.(contextMenu.node) },
+              { icon: 'expand', label: 'Expand its connections',
+                run: () => handleExpand(contextMenu.node) },
+              { icon: 'layers', label: 'Isolate its neighbourhood',
+                run: () => handleIsolate(contextMenu.node, 2) },
+              { icon: 'route', label: 'Trace a connection from here',
+                run: () => startPath(contextMenu.node) },
+              { separator: true },
+              { icon: 'edit', label: 'Add a note or finding',
+                run: () => { selectNode(contextMenu.node, { center: false }); setSideTab('selection'); setShowSide(true); } },
+              { icon: 'copy', label: 'Copy identifier',
+                run: () => navigator.clipboard?.writeText(contextMenu.node) },
+            ]}
+          />
+        )}
       </div>
 
       {/* ── Side panel ──────────────────────────────────────────── */}
@@ -960,8 +980,21 @@ export default function GraphExplorer() {
                 </div>
                 <div className="prop-row">
                   <span className="prop-label">Edges drawn</span>
-                  <span className="prop-value mono">{fmtInt(shownEdges)}</span>
+                  {/* What is on the canvas, not what the graph holds. With
+                      inferred links withheld the two differ by thousands, and
+                      quoting the total here would contradict the canvas. */}
+                  <span className="prop-value mono">
+                    {fmtInt(density ? shownEdges - density.withheld : shownEdges)}
+                  </span>
                 </div>
+                {density && (
+                  <div className="prop-row">
+                    <span className="prop-label">Edges held back</span>
+                    <span className="prop-value mono" title="Co-input and IP relationships, hidden at this density">
+                      {fmtInt(density.withheld)}
+                    </span>
+                  </div>
+                )}
                 <div className="prop-row">
                   <span className="prop-label">Passing filters</span>
                   <span className="prop-value mono">{fmtInt(drawn.visible.length)}</span>
