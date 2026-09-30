@@ -1,0 +1,19 @@
+[
+ ["s1a","slide1","We're Team Ahavaan, and this is ChainTrace Forensics, our solution to S I H 2 6 1 4 6 from N T R O: an A I powered system for monitoring and analysing Bitcoin transactions."],
+ ["s2a","slide2","Crypto evidence is scattered across files, and criminals use peeling chains and mixing to break the trail."],
+ ["s2b","slide2","ChainTrace brings it into one workstation that links wallets, transactions and I P s, and flags suspicious activity with clear reasons."],
+ ["s3a","overview","Data comes in as C S V, JSON or X M L, or live from the blockchain."],
+ ["s3b","overview","One run builds the graph, clusters wallets, runs our detectors and scores every wallet."],
+ ["s3c","overview","The Overview shows 4,938 transactions and the top priority alerts at a glance."],
+ ["s4a","alert open","Here's a wallet flagged for a peeling chain."],
+ ["s4b","explanation","ChainTrace shows why: it sits in a five hop peel sequence, its activity was seen from four countries, and the wallet is less than an hour old."],
+ ["s4c","decision","The investigator records a decision right here, so every lead is explainable, not just a score."],
+ ["s5a","graph","In the Graph Explorer, we follow the money."],
+ ["s5b","wallet selected","Selecting the wallet highlights its connections,"],
+ ["s5c","E 1","and Expand grows the picture, step by step."],
+ ["s5d","trace start","With Trace, we enter a second address, and ChainTrace finds the shortest path between them, hop by hop."],
+ ["s5e","trace","That takes hours by hand."],
+ ["s5f","export","The view exports as P N G or JSON for reports."],
+ ["s6a","closing","ChainTrace runs fully offline on a single machine, so sensitive evidence never leaves the investigator's system."],
+ ["s6b","closing","Trace, review and record Bitcoin evidence in one place. Thank you."]
+]
