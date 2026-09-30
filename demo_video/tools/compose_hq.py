@@ -10,7 +10,7 @@ import imageio_ffmpeg
 
 D = os.path.dirname(os.path.abspath(__file__)) + '/'
 FF = imageio_ffmpeg.get_ffmpeg_exe()
-AUDIO = D + 'full/take1.mp3'
+AUDIO = os.environ.get('AUDIO', D + 'full/take1.mp3')
 WORDS = json.load(open(AUDIO + '.words.json'))
 MARKS = json.load(open(D + 'hq/marks.json'))
 LEAD = 0.8                                   # silence before the first word
@@ -25,8 +25,46 @@ def word(text, after=0.0, end=False):
     raise KeyError(text)
 
 
+import re
+_sd = subprocess.run([FF, '-i', AUDIO, '-af', 'silencedetect=noise=-40dB:d=0.15', '-f', 'null', '-'],
+                     capture_output=True, text=True).stderr
+SILENCES = list(zip(map(float, re.findall(r'silence_start: ([0-9.]+)', _sd)),
+                    map(float, re.findall(r'silence_end: ([0-9.]+)', _sd))))
+
+
+def gap_before(t):
+    """Midpoint of the measured silence just before word-start time t.
+
+    Looks only between the previous word and this one; if nothing there is
+    below the strict threshold (a comma said quickly), it takes the
+    quietest 40 ms inside that window instead.
+    """
+    prev = max(w_s for w, w_s, e in WORDS if w_s < t - 0.05)
+    cands = [(a, b) for a, b in SILENCES if b <= t + 0.35 and b > prev]
+    if cands:
+        a, b = max(cands, key=lambda ab: ab[1])
+        return (a + b) / 2
+    import numpy as np
+    raw = subprocess.run([FF, '-v', 'error', '-ss', str(prev), '-to', str(t), '-i', AUDIO,
+                          '-ac', '1', '-ar', '16000', '-f', 's16le', '-'], capture_output=True).stdout
+    x = np.frombuffer(raw, np.int16).astype(float)
+    win = 640
+    e = [np.sqrt(np.mean(x[i:i + win] ** 2)) for i in range(0, len(x) - win, 160)]
+    i = int(np.argmin(e))
+    return prev + (i * 160 + win / 2) / 16000
+
+
+DEC = word('decision')
+G = word('graph', DEC)                                   # "In the Graph Explorer"
 # (midpoint of an existing pause in the original take, seconds of silence to add)
-INSERTS = [(29.30, 1.0), (49.05, 2.5), (67.60, 1.0), (70.19, 2.5), (72.57, 2.2), (75.22, 1.4), (86.90, 1.8)]
+INSERTS = [(gap_before(word('investigators')), 1.0),
+           (gap_before(word('here', 40)), 2.5),
+           (gap_before(word('in', DEC + 1)), 1.0),
+           (gap_before(word('selecting')), 2.5),
+           (gap_before(word('and', word('connections'))), 2.2),
+           (gap_before(word('with', word('step'))), 1.4),
+           (gap_before(word('chain', word('reports'))), 1.8)]
+print('inserts', [(round(m, 2), x) for m, x in INSERTS])
 
 
 def final(t):
@@ -45,7 +83,7 @@ pieces.append(('a', prev, audio_len))
 fc, labels = [f'anullsrc=r=48000:cl=mono,atrim=0:{LEAD}[lead]'], ['[lead]']
 for i, pc in enumerate(pieces):
     if pc[0] == 'a':
-        fc.append(f'[0:a]aresample=48000,aformat=channel_layouts=mono,atrim={pc[1]}:{pc[2]},asetpts=PTS-STARTPTS[p{i}]')
+        fc.append(f'[0:a]aresample=48000,aformat=channel_layouts=mono,atrim={pc[1]}:{pc[2]},asetpts=PTS-STARTPTS,afade=t=in:d=0.02,areverse,afade=t=in:d=0.02,areverse[p{i}]')
     else:
         fc.append(f'anullsrc=r=48000:cl=mono,atrim=0:{pc[1]}[p{i}]')
     labels.append(f'[p{i}]')
@@ -55,21 +93,20 @@ subprocess.run([FF, '-y', '-loglevel', 'error', '-i', AUDIO, '-filter_complex', 
 narr_len = final(audio_len)
 
 # ---- where each logged action must land in the final timeline
-G = word('graph', 60)                                    # "In the Graph Explorer"
 target = {
-    'screen start':    final(word('data')) - 0.9,
-    'alerts nav':      final(word('alerts', 45, end=True)) + 0.3,
-    'alert open':      final(word("here's", 49)),
-    'explanation':     final(word('shows', 51)),
+    'screen start':    final(word('investigators')) - 0.9,
+    'alerts nav':      final(word('glance', end=True)) + 0.3,
+    'alert open':      final(word('here', 40)),
+    'explanation':     final(word('explains')),
     'decision':        final(word('decision')) + 0.2,
     'decision end':    final(G) - 0.5,
     'graph take':      final(G) - 0.5,
     'graph found':     final(word('money', end=True)) + 0.3,
     'wallet selected': final(word('highlights')),
-    'E 1':             final(word('expand', 70)) + 0.1,
-    'trace start':     final(word('with', 75)),
+    'E 1':             final(word('expand', DEC)) + 0.1,
+    'trace start':     final(word('with', word('step'))),
     'find':            final(word('shortest')),
-    'export':          final(word('exports')),
+    'export':          final(word('exported')),
     'end':             final(word('reports', end=True)) + 1.2,
 }
 order = ['screen start', 'alerts nav', 'alert open', 'explanation', 'decision', 'decision end',
@@ -86,7 +123,7 @@ for a, b in zip(order, order[1:]):
     segs.append((a, b, src0, src1, dst))
     print(f'{a:>15} -> {b:<15} src {src1 - src0:5.2f}s  dst {dst:5.2f}s  speed x{(src1 - src0) / dst:4.2f}')
 
-slide1_end = final(word('see')) - 0.25
+slide1_end = final(word('cryptocurrency')) - 0.25
 screen0 = target['screen start']
 close0 = target['end']
 total = narr_len + 1.2
