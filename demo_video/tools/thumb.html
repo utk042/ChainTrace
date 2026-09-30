@@ -1,29 +1,27 @@
 <!doctype html><html><head><meta charset="utf-8"><style>
 *{margin:0;box-sizing:border-box}
-body{width:1280px;height:720px;overflow:hidden;position:relative;font-family:"DejaVu Sans",Arial,sans-serif;
- background:radial-gradient(ellipse at 75% 45%,#16345c 0%,#0a1424 55%,#05090f 100%);color:#fff}
-.grid{position:absolute;inset:0;background-image:linear-gradient(rgba(80,140,255,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(80,140,255,.07) 1px,transparent 1px);background-size:40px 40px}
-.shot{position:absolute;right:-40px;top:120px;width:700px;height:420px;border-radius:14px;overflow:hidden;
- transform:perspective(1400px) rotateY(-14deg) rotateX(3deg);box-shadow:0 0 0 3px #f5a524,0 30px 80px rgba(0,0,0,.7),0 0 70px rgba(245,165,36,.35)}
-.shot img{position:absolute;left:-20px;top:-68px;width:1100px}
-.crit{position:absolute;right:70px;top:78px;background:#e11d48;border:3px solid #fff;border-radius:12px;padding:8px 18px;font-size:30px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.5)}
-.left{position:absolute;left:56px;top:175px;width:560px}
-.kicker{display:inline-block;background:rgba(255,255,255,.1);border:2px solid rgba(255,255,255,.35);color:#fff;font-weight:800;font-size:22px;padding:6px 14px;border-radius:8px;letter-spacing:1px}
-h1{margin-top:18px;font-size:88px;line-height:.98;font-weight:900;letter-spacing:-2px;text-shadow:0 6px 24px rgba(0,0,0,.6)}
-h1 .o{color:#f5a524}
-.sub{margin-top:22px;font-size:30px;font-weight:700;color:#cfe0ff}
-.sub b{color:#fff}
-.badge{position:absolute;right:48px;bottom:48px;background:#0b6fb8;border:3px solid #fff;border-radius:14px;padding:12px 22px;font-size:32px;font-weight:900;box-shadow:0 10px 30px rgba(0,0,0,.5)}
-.sih{position:absolute;left:48px;top:32px;height:84px;background:#fff;border-radius:12px;padding:6px 12px}
-.team{position:absolute;left:238px;top:32px;height:84px;border-radius:12px;background:#fff;padding:4px}
+body{width:1280px;height:720px;overflow:hidden;position:relative;background:#0b1b33;font-family:"Source Sans 3",sans-serif;color:#fff}
+.panel{position:absolute;left:0;top:0;bottom:0;width:580px;background:#0b1b33;z-index:2}
+.shot{position:absolute;left:612px;top:118px;width:820px;height:461px;border-radius:10px;overflow:hidden;
+ box-shadow:0 24px 60px rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.14)}
+.shot img{width:100%;display:block}
+.logos{position:absolute;left:64px;top:56px;display:flex;gap:14px;align-items:center}
+.logos img{height:64px;background:#fff;border-radius:8px;padding:5px 10px}
+.logos img.team{padding:3px}
+.title{position:absolute;left:62px;top:230px;font-size:94px;font-weight:900;letter-spacing:-2px;line-height:1}
+.title span{color:#4ea8ff}
+.sub{position:absolute;left:66px;top:346px;width:470px;font-size:32px;font-weight:600;line-height:1.2;color:#dbe7f7}
+.rule{position:absolute;left:66px;top:470px;width:64px;height:5px;background:#4ea8ff;border-radius:3px}
+.meta{position:absolute;left:66px;top:500px;font-size:24px;line-height:1.45;color:#9fb3cc;font-weight:600}
+.meta b{color:#fff;font-weight:700}
+.bar{position:absolute;left:0;right:0;bottom:0;height:10px;background:#0b6fb8;z-index:3}
 </style></head><body>
-<div class="grid"></div>
-<div class="shot"><img src="f96.png"></div>
-<img class="sih" src="sih.png"><img class="team" src="logo.jpg">
-<div class="left">
- <span class="kicker">PROBLEM BY NTRO</span>
- <h1>FOLLOW<br>THE <span class="o">BITCOIN</span></h1>
- <div class="sub"><b>AI-powered</b><br>Bitcoin forensics</div>
-</div>
-<div class="badge">4 HOPS TRACED</div><div class="crit">CRITICAL 97/100</div>
+<div class="shot"><img src="app_overview.png"></div>
+<div class="panel"></div>
+<div class="logos" style="z-index:3"><img src="sih.png"><img class="team" src="logo.jpg"></div>
+<div class="title" style="z-index:3">Chain<span>Trace</span></div>
+<div class="sub" style="z-index:3">AI-Powered Bitcoin<br>Transaction Analysis</div>
+<div class="rule" style="z-index:3"></div>
+<div class="meta" style="z-index:3"><b>Smart India Hackathon 2026</b><br>Problem statement by NTRO<br>Team Ahavaan</div>
+<div class="bar"></div>
 </body></html>
