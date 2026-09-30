@@ -40,15 +40,15 @@ await click(p.locator('tbody tr').first());           // open the alert
 mark('alert open'); 
 await at(26);
 await click(p.locator('.tabs [role=tab]',{hasText:/^Explanation/})); mark('explanation');   // top features
-await at(33.3);
+await at(35.6);
 await click(p.locator('.tabs [role=tab]',{hasText:/^Overview$/}));
 await p.waitForTimeout(600);
 await p.getByText('Disposition',{exact:true}).first().scrollIntoViewIfNeeded().catch(()=>{});
-await at(35.3);
+await at(37.9);
 await click(p.locator('.chip[title^="Mark this alert"]',{hasText:'investigating'}));  // record a decision
 mark('decision');
 // ---- Graph (second take, joined in edit)
-await at(40);
+await at(42);
 const vA=await p.video().path(); const offA=(T0-ctxStart)/1000;
 const p1=p; 
 const ctxStartB=Date.now();
@@ -57,7 +57,7 @@ await p.goto('http://localhost:5173/graph',{waitUntil:'networkidle'});
 await p.getByText('sample of').waitFor({timeout:60000});await p.waitForTimeout(2000);
 await p.mouse.move(300,400);
 await p.waitForTimeout(500);
-T0=Date.now()-40000; mark('graph'); const offB=(Date.now()-ctxStartB)/1000;
+T0=Date.now()-42000; mark('graph'); const offB=(Date.now()-ctxStartB)/1000;
 await p1.close();
 const f=p.getByLabel('Find in graph');
 await click(f); await f.pressSequentially(W,{delay:18});
@@ -98,10 +98,10 @@ const to=p.getByPlaceholder('Paste an address, txid or IP');
 await click(to); await to.pressSequentially(T,{delay:12});
 await p.waitForTimeout(500);
 await click(p.getByRole('button',{name:'Find shortest path'})); mark('trace');
-await at(70.5);
+await at(72.5);
 await click(p.getByRole('button',{name:'Export'})); await p.waitForTimeout(700);
 await click(p.getByText('Export canvas as PNG'));    mark('export');
-await p.waitForTimeout(1500);await p.keyboard.press('Escape');await at(76);
+await p.waitForTimeout(1500);await p.keyboard.press('Escape');await at(78);
 const vB=await p.video().path();
 await ctx.close(); await b.close();
 fs.writeFileSync(D+'meta.json',JSON.stringify({vA,offA,vB,offB,MARKS}));
