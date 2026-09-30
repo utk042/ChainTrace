@@ -57,13 +57,13 @@ def gap_before(t):
 DEC = word('decision')
 G = word('graph', DEC)                                   # "In the Graph Explorer"
 # (midpoint of an existing pause in the original take, seconds of silence to add)
-INSERTS = [(gap_before(word('investigators')), 1.0),
-           (gap_before(word('here', 40)), 2.5),
-           (gap_before(word('in', DEC + 1)), 1.0),
-           (gap_before(word('selecting')), 2.5),
-           (gap_before(word('and', word('connections'))), 2.2),
-           (gap_before(word('with', word('step'))), 1.4),
-           (gap_before(word('chain', word('reports'))), 1.8)]
+# A negative value trims that much out of the middle of an overlong pause.
+INSERTS = [(gap_before(word('investigators')), 0.2),
+           (gap_before(word('here', 40)), 0.6),
+           (gap_before(word('in', DEC + 1)), -0.4),
+           (gap_before(word('selecting')), 0.6),
+           (gap_before(word('with', word('step'))), 0.6),
+           (gap_before(word('chain', word('reports'))), -0.7)]
 print('inserts', [(round(m, 2), x) for m, x in INSERTS])
 
 
@@ -78,7 +78,10 @@ audio_len = int(_h) * 3600 + int(_m) * 60 + float(_s)
 # ---- narration track: take1 with silence spliced into pauses
 pieces, prev = [], 0.0
 for m, x in INSERTS:
-    pieces.append(('a', prev, m)); pieces.append(('s', x)); prev = m
+    if x >= 0:
+        pieces.append(('a', prev, m)); pieces.append(('s', x)); prev = m
+    else:
+        pieces.append(('a', prev, m + x / 2)); prev = m - x / 2
 pieces.append(('a', prev, audio_len))
 fc, labels = [f'anullsrc=r=48000:cl=mono,atrim=0:{LEAD}[lead]'], ['[lead]']
 for i, pc in enumerate(pieces):
@@ -95,19 +98,19 @@ narr_len = final(audio_len)
 # ---- where each logged action must land in the final timeline
 target = {
     'screen start':    final(word('investigators')) - 0.9,
-    'alerts nav':      final(word('glance', end=True)) + 0.3,
+    'alerts nav':      final(word('highest')) - 0.3,
     'alert open':      final(word('here', 40)),
     'explanation':     final(word('explains')),
     'decision':        final(word('decision')) + 0.2,
-    'decision end':    final(G) - 0.5,
-    'graph take':      final(G) - 0.5,
-    'graph found':     final(word('money', end=True)) + 0.3,
+    'decision end':    final(G) - 2.4,
+    'graph take':      final(G) - 2.4,
+    'graph found':     final(G) + 0.6,
     'wallet selected': final(word('highlights')),
     'E 1':             final(word('expand', DEC)) + 0.1,
     'trace start':     final(word('with', word('step'))),
     'find':            final(word('shortest')),
     'export':          final(word('exported')),
-    'end':             final(word('reports', end=True)) + 1.2,
+    'end':             final(word('reports', end=True)) + 0.9,
 }
 order = ['screen start', 'alerts nav', 'alert open', 'explanation', 'decision', 'decision end',
          'graph take', 'graph found', 'wallet selected', 'E 1', 'trace start', 'find', 'export', 'end']

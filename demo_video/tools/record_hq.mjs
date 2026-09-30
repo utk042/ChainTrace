@@ -110,9 +110,17 @@ for (let i = 0; i < 3; i++) {       // the default graph can land late and repla
 }
 await fit();
 await clickNode('bc1qc662a6c4'); mark('wallet selected');
-await p.mouse.move(900, 700, { steps: 15 }); await wait(800);
-await fit();
-await clickNode('147.234.127.');
+await wait(700);                          // let the camera settle on the wallet
+await p.mouse.move(900, 720, { steps: 8 });
+await p.keyboard.press('f'); await wait(800);
+// The IP two hops out; expanding it adds new entities. The camera is still
+// easing onto the wallet, so retry until the inspector shows the IP.
+for (let i = 0; i < 6; i++) {
+  await clickNode('147.234.127.'); await wait(450);
+  if (await p.getByText('147.234.127.193').first().isVisible().catch(() => false)
+      && await p.getByText('IP address', { exact: true }).first().isVisible().catch(() => false)) break;
+  console.log('ip not selected yet', JSON.stringify(await nodeXY('147.234.127.')), JSON.stringify(await nodeXY('bc1qc662a6c4'))); if (process.env.NOCAP && i==0) await p.screenshot({path: D+'ipdbg.png'});
+}
 await p.mouse.move(900, 720, { steps: 10 });
 await p.keyboard.press('e'); mark('E 1');
 await wait(1500);
