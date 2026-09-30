@@ -49,7 +49,7 @@ for lid in anchor:
 screen_len = max(SCREEN_A + SCREEN_B, e - SO + 0.8)
 close0 = SO + screen_len
 e = put('s6a', close0 + 0.5); e = put('s6b', e + 0.4)
-total = e + 2.0
+total = e + 1.5
 print(f'slide1 0-{slide1:.1f}  slide2 -{slide2:.1f}  screen -{close0:.1f}  closing -{total:.1f}')
 for lid in place:
     print(f'  {lid} {place[lid]:6.2f} -> {place[lid] + clip[lid][1]:6.2f}')
